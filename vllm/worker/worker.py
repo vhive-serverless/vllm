@@ -69,6 +69,9 @@ class Worker:
         self.cache_events = None
         self.gpu_cache = None
 
+        self.head_cache = None
+        self.tail_cache = None
+
     def init_model(self, cupy_port: Optional[int] = None) -> None:
         if self.device_config.device.type == "cuda":
             # torch.distributed.all_reduce does not free the input tensor until
@@ -96,8 +99,39 @@ class Worker:
         # Initialize the model.
         set_random_seed(self.model_config.seed)
 
+    def init_liquid_model(self, cupy_port: Optional[int] = None) -> None:
+        if self.device_config.device.type == "cuda":
+            os.environ["TORCH_NCCL_AVOID_RECORD_STREAMS"] = "1"
+
+            # This env var set by Ray causes exceptions with graph building.
+            os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
+            self.device = torch.device(f"cuda:{self.local_rank}")
+            # First frees up cache on cuda:1
+            torch.cuda.set_device('cuda:1')
+
+            _check_if_gpu_supports_dtype(self.model_config.dtype)
+            torch.cuda.empty_cache()
+            # Then frees up cache on cuda:0
+            torch.cuda.set_device('cuda:0')
+
+            _check_if_gpu_supports_dtype(self.model_config.dtype)
+            torch.cuda.empty_cache()
+            self.init_gpu_memory = torch.cuda.mem_get_info()[0]
+        else:
+            raise RuntimeError(
+                f"Not support device type: {self.device_config.device}")
+        # Initialize the distributed environment.
+        init_distributed_environment(self.parallel_config, self.rank,
+                                     cupy_port, self.distributed_init_method)
+        # Initialize the model.
+        set_random_seed(self.model_config.seed)
+
     def load_model(self):
         self.model_runner.load_model()
+
+    def load_liquid_model(self):
+        self.model_runner.load_liquid_model() 
+
 
     @torch.inference_mode()
     def profile_num_available_blocks(
@@ -148,9 +182,11 @@ class Worker:
     def init_cache_engine(self, cache_config: CacheConfig) -> None:
         self.cache_config = cache_config
         self.cache_engine = CacheEngine(self.cache_config, self.model_config,
-                                        self.parallel_config)
+                                        self.parallel_config, head_device="cuda:0", tail_device="cuda:1")
         self.cache_events = self.cache_engine.events
-        self.gpu_cache = self.cache_engine.gpu_cache
+        # self.gpu_cache = self.cache_engine.gpu_cache
+        self.head_cache = self.cache_engine.head_cache
+        self.tail_cache = self.cache_engine.tail_cache
         self.model_runner.set_block_size(self.cache_engine.block_size)
 
     def warm_up_model(self) -> None:
@@ -221,7 +257,7 @@ class Worker:
             return {}
 
         output = self.model_runner.execute_model(seq_group_metadata_list,
-                                                 self.gpu_cache)
+                                                 self.head_cache, self.tail_cache)
         return output
 
     def add_lora(self, lora_request: LoRARequest) -> bool:

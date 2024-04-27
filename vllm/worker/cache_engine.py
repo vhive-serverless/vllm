@@ -25,6 +25,8 @@ class CacheEngine:
         cache_config: CacheConfig,
         model_config: ModelConfig,
         parallel_config: ParallelConfig,
+        head_device:str,
+        tail_device:str
     ) -> None:
         self.cache_config = cache_config
         self.model_config = model_config
@@ -48,8 +50,10 @@ class CacheEngine:
             self.dtype = STR_DTYPE_TO_TORCH_DTYPE[cache_config.cache_dtype]
 
         # Initialize the cache.
-        self.gpu_cache = self.allocate_gpu_cache()
+        # self.gpu_cache = self.allocate_gpu_cache()
         self.cpu_cache = self.allocate_cpu_cache()
+
+        self.head_cache, self.tail_cache = self.allocate_liquid_cache(head_device=head_device, tail_device=tail_device)
 
         # Initialize the stream for caching operations.
         self.cache_stream = torch.cuda.Stream()
@@ -90,7 +94,43 @@ class CacheEngine:
                 device="cuda",
             )
             gpu_cache.append((key_blocks, value_blocks))
+
+
         return gpu_cache
+
+    def allocate_liquid_cache(self,head_device:str,tail_device:str) -> Tuple[List[KVCache], List[KVCache]]:
+        head_cache: List[KVCache] = []
+        tail_cache: List[KVCache] = []
+        key_block_shape = self.get_key_block_shape()
+        value_block_shape = self.get_value_block_shape()
+        for _ in range(self.num_layers // 2):
+            key_blocks = torch.empty(
+                size=(self.num_gpu_blocks, *key_block_shape),
+                dtype=self.dtype,
+                device=head_device,
+            )
+            value_blocks = torch.empty(
+                size=(self.num_gpu_blocks, *value_block_shape),
+                dtype=self.dtype,
+                device=head_device,
+            )
+            head_cache.append((key_blocks, value_blocks))
+
+        for _ in range(self.num_layers // 2):
+            key_blocks = torch.empty(
+                size=(self.num_gpu_blocks, *key_block_shape),
+                dtype=self.dtype,
+                device=tail_device,
+            )
+            value_blocks = torch.empty(
+                size=(self.num_gpu_blocks, *value_block_shape),
+                dtype=self.dtype,
+                device=tail_device,
+            )
+            tail_cache.append((key_blocks, value_blocks))
+
+
+        return head_cache, tail_cache
 
     def allocate_cpu_cache(self) -> List[KVCache]:
         cpu_cache: List[KVCache] = []

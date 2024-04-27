@@ -22,6 +22,7 @@ from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
 from vllm.lora.layers import LoRAMapping
 from vllm.lora.request import LoRARequest
 from vllm.utils import in_wsl
+from vllm.model_executor.liquid_models import OPTHeader, OPTLayers, OPTTailer
 
 logger = init_logger(__name__)
 
@@ -109,6 +110,40 @@ class ModelRunner:
                 self.lora_config, self.device, self.model.embedding_modules,
                 self.model.embedding_padding_modules)
             self.model = self.lora_manager.create_lora_manager(self.model)
+
+    def load_liquid_model(self):
+        self.load_model()
+        config = self.model.config
+        linear_method = self.model.linear_method
+
+        self.header = OPTHeader(config, linear_method)
+        self.header.from_whole_model(self.model)
+        self.header = self.header.to("cuda:0")
+        print(f"self.header: {self.header}")
+
+        head_start = 0
+        head_end = config.num_hidden_layers // 2
+        self.head_layers = OPTLayers(config, linear_method, range_start=head_start, range_end=head_end)
+        self.head_layers.from_whole_model(self.model, head_start)
+        self.head_layers = self.head_layers.to("cuda:0")
+        print(f"self.head_layers={self.head_layers}")
+
+        tail_start = head_end
+        self.tail_layers = OPTLayers(config, linear_method, range_start=tail_start, range_end=config.num_hidden_layers)
+        self.tail_layers.from_whole_model(self.model, tail_start)
+        self.tail_layers = self.tail_layers.to("cuda:1")
+        # self.tail_layers = self.tail_layers.to("cuda:0")
+        print(f"self.tail_layers={self.tail_layers}")
+
+        self.tailer = OPTTailer(config, linear_method, lm_head_weight=self.header.embed_tokens.weight)
+        self.tailer.from_whole_model(self.model)
+        self.tailer = self.tailer.to("cuda:0")
+        print(f"self.tailer={self.tailer}")
+
+        
+
+        del self.model
+        self.model = None
 
     def set_block_size(self, block_size: int) -> None:
         self.block_size = block_size
@@ -564,7 +599,8 @@ class ModelRunner:
     def execute_model(
         self,
         seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
-        kv_caches: List[Tuple[torch.Tensor, torch.Tensor]],
+        head_cache: List[Tuple[torch.Tensor, torch.Tensor]],
+        tail_cache: List[Tuple[torch.Tensor, torch.Tensor]],
     ) -> Optional[SamplerOutput]:
         (input_tokens, input_positions, input_metadata, sampling_metadata,
          lora_requests,
@@ -579,15 +615,40 @@ class ModelRunner:
             model_executable = self.graph_runners[graph_batch_size]
         else:
             model_executable = self.model
-        hidden_states = model_executable(
+        
+        # hidden_states = model_executable(
+        #     input_ids=input_tokens,
+        #     positions=input_positions,
+        #     kv_caches=kv_caches,
+        #     input_metadata=input_metadata,
+        # )
+
+        hidden_states = self.header(
             input_ids=input_tokens,
             positions=input_positions,
-            kv_caches=kv_caches,
+        )
+
+        hidden_states = self.head_layers(
+            hidden_states=hidden_states,
+            kv_caches=head_cache,
             input_metadata=input_metadata,
+        )
+        # send hidden_states to cuda:1
+        hidden_states = hidden_states.to("cuda:1")
+        input_metadata.attn_bias.to("cuda:1")
+        hidden_states = self.tail_layers(
+            hidden_states=hidden_states,
+            kv_caches=tail_cache,
+            input_metadata=input_metadata,
+        )
+        # send hidden_states back to cuda:0
+        hidden_states = hidden_states.to("cuda:0")
+        hidden_states = self.tailer(
+            hidden_states=hidden_states,
         )
 
         # Sample the next token.
-        output = self.model.sample(
+        output = self.tailer.sample(
             hidden_states=hidden_states,
             sampling_metadata=sampling_metadata,
         )
@@ -643,8 +704,10 @@ class ModelRunner:
 
         # Run the model with the dummy inputs.
         num_layers = self.model_config.get_num_layers(self.parallel_config)
-        kv_caches = [(None, None)] * num_layers
-        self.execute_model(seqs, kv_caches)
+        # kv_caches = [(None, None)] * num_layers
+        head_cache = [(None, None)] * (num_layers // 2)
+        tail_cache = [(None, None)] * (num_layers // 2)
+        self.execute_model(seqs, head_cache=head_cache, tail_cache=tail_cache)
         torch.cuda.synchronize()
         return
 

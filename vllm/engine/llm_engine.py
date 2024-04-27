@@ -179,8 +179,10 @@ class LLMEngine:
             kv_cache_dtype=self.cache_config.cache_dtype,
             is_driver_worker=True,
         )
-        self._run_workers("init_model")
-        self._run_workers("load_model")
+        # self._run_workers("init_model")
+        # self._run_workers("load_model")
+        self._run_workers("init_liquid_model")
+        self._run_workers("load_liquid_model")
 
     def _init_tokenizer(self, **tokenizer_init_kwargs):
         init_kwargs = dict(
@@ -358,6 +360,8 @@ class LLMEngine:
         # FIXME(woosuk): Change to debug log.
         logger.info(f"# GPU blocks: {num_gpu_blocks}, "
                     f"# CPU blocks: {num_cpu_blocks}")
+
+        logger.info(f"Finished profiling execution")
 
         if num_gpu_blocks <= 0:
             raise ValueError("No available memory for the cache blocks. "

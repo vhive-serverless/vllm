@@ -170,6 +170,7 @@ class PagedAttention(nn.Module):
                                 self.sliding_window)
                         input_metadata.attn_bias = attn_bias
                     else:
+                        print(f"alibi bias")
                         input_metadata.attn_bias = _make_alibi_bias(
                             self.alibi_slopes, self.num_kv_heads, batch_size,
                             seq_len, query.dtype)
@@ -194,7 +195,6 @@ class PagedAttention(nn.Module):
                     query = query.unflatten(0, (batch_size, seq_len))
                     key = key.unflatten(0, (batch_size, seq_len))
                     value = value.unflatten(0, (batch_size, seq_len))
-
                 out = xops.memory_efficient_attention_forward(
                     query,
                     key,
