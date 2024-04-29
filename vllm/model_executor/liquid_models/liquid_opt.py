@@ -50,8 +50,8 @@ class OPTLiquid(OPTForCausalLM):
 
     def forward(self, input_ids: torch.Tensor, positions: torch.Tensor, cache_group: Dict[Slice, List[Tuple[torch.Tensor]]], input_metadata: InputMetadata) -> torch.Tensor:
         # forward must be performed after liquid
-        # input_ids = input_ids.to("cuda:1")
-        # positions = positions.to("cuda:1")
+        # input_ids = input_ids.to("cuda:0")
+        # positions = positions.to("cuda:0")
         assert self.liquid_to
         decoder = self.model.decoder
         inputs_embeds = decoder.embed_tokens(input_ids)
@@ -81,6 +81,7 @@ class OPTLiquid(OPTForCausalLM):
 
         # after layers forwarding, send the hidden states back to cuda:0
         hidden_states = hidden_states.to("cuda:0")
+
 
         if decoder.final_layer_norm is not None:
             hidden_states = decoder.final_layer_norm(hidden_states)

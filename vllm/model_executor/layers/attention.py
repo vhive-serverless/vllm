@@ -126,6 +126,9 @@ class PagedAttention(nn.Module):
         # If key_cache and value_cache are not provided, the new key and value
         # vectors will not be cached. This happens during the initial memory
         # profiling run.
+        device = key.device
+        stream = torch.cuda.Stream(device=device)
+        torch.cuda.set_stream(stream)
         print(f"attention[PagedAttention.forward()]: Before reshape_and_cache, try access gpu memory...",end='')
         try:
             torch.cuda.synchronize()
