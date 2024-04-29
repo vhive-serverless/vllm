@@ -22,6 +22,7 @@ from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
 from vllm.lora.layers import LoRAMapping
 from vllm.lora.request import LoRARequest
 from vllm.utils import in_wsl
+from vllm.model_executor.liquid_models import OPTLiquid, LIQUIDCONFIG, Slice
 
 logger = init_logger(__name__)
 
@@ -109,6 +110,43 @@ class ModelRunner:
                 self.lora_config, self.device, self.model.embedding_modules,
                 self.model.embedding_padding_modules)
             self.model = self.lora_manager.create_lora_manager(self.model)
+
+    def load_liquid_model(self) -> None:
+        self.model = get_model(self.model_config,
+                               self.device_config,
+                               lora_config=self.lora_config,
+                               parallel_config=self.parallel_config,
+                               scheduler_config=self.scheduler_config)
+
+        liquid_model = OPTLiquid(self.model.config)
+        # copy the state dict of opt model
+        liquid_model.from_opt_model(self.model)
+        # free the original model
+        del self.model
+        self.model:OPTLiquid = liquid_model
+        # perform the liquid operation, send layers to different devices
+        self.model = self.model.to("cuda")
+        self.model.liquid() 
+
+        vocab_size = self.model.config.vocab_size
+
+        if self.lora_config:
+            assert hasattr(
+                self.model, "supported_lora_modules"
+            ) and self.model.supported_lora_modules, "Model does not support LoRA"
+            assert hasattr(
+                self.model,
+                "embedding_modules"), "Model does not have embedding_modules"
+            assert hasattr(self.model, "embedding_padding_modules"
+                           ), "Model does not have embedding_padding_modules"
+            self.lora_manager = LRUCacheWorkerLoRAManager(
+                self.scheduler_config.max_num_seqs,
+                self.scheduler_config.max_num_batched_tokens +
+                self.scheduler_config.max_paddings, vocab_size,
+                self.lora_config, self.device, self.model.embedding_modules,
+                self.model.embedding_padding_modules)
+            self.model = self.lora_manager.create_lora_manager(self.model)
+
 
     def set_block_size(self, block_size: int) -> None:
         self.block_size = block_size
@@ -564,7 +602,7 @@ class ModelRunner:
     def execute_model(
         self,
         seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
-        kv_caches: List[Tuple[torch.Tensor, torch.Tensor]],
+        cache_group: Dict[Slice, Tuple[torch.Tensor, torch.Tensor]],
     ) -> Optional[SamplerOutput]:
         (input_tokens, input_positions, input_metadata, sampling_metadata,
          lora_requests,
@@ -582,7 +620,7 @@ class ModelRunner:
         hidden_states = model_executable(
             input_ids=input_tokens,
             positions=input_positions,
-            kv_caches=kv_caches,
+            cache_group=cache_group,
             input_metadata=input_metadata,
         )
 
@@ -642,9 +680,11 @@ class ModelRunner:
             seqs.append(seq)
 
         # Run the model with the dummy inputs.
-        num_layers = self.model_config.get_num_layers(self.parallel_config)
-        kv_caches = [(None, None)] * num_layers
-        self.execute_model(seqs, kv_caches)
+        cache_group = {}
+        for layers_range in LIQUIDCONFIG:
+            num_layers = layers_range[1] - layers_range[0]
+            cache_group[layers_range] = [(None, None)] * num_layers 
+        self.execute_model(seqs, cache_group)
         torch.cuda.synchronize()
         return
 

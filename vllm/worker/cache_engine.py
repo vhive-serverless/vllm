@@ -6,6 +6,7 @@ import torch
 from vllm.config import CacheConfig, ModelConfig, ParallelConfig
 from vllm.logger import init_logger
 from vllm.utils import in_wsl, is_neuron, STR_DTYPE_TO_TORCH_DTYPE
+from vllm.model_executor.liquid_models import LIQUIDCONFIG, LiquidConfigType, Slice
 
 logger = init_logger(__name__)
 
@@ -50,6 +51,7 @@ class CacheEngine:
         # Initialize the cache.
         self.gpu_cache = self.allocate_gpu_cache()
         self.cpu_cache = self.allocate_cpu_cache()
+        self.cache_group:Dict[Slice, List[KVCache]] = self.allocate_cache_group()
 
         # Initialize the stream for caching operations.
         self.cache_stream = torch.cuda.Stream()
@@ -91,6 +93,28 @@ class CacheEngine:
             )
             gpu_cache.append((key_blocks, value_blocks))
         return gpu_cache
+
+    def allocate_cache_group(self) -> Dict[Slice, List[KVCache]]:
+        cache_group : Dict[Slice, List[KVCache]] = {} 
+        for layers_range in LIQUIDCONFIG:
+            device = LIQUIDCONFIG[layers_range]
+            gpu_cache: List[KVCache] = []
+            key_block_shape = self.get_key_block_shape()
+            value_block_shape = self.get_value_block_shape()
+            for _ in range(layers_range[1] - layers_range[0]):
+                key_blocks = torch.empty(
+                    size=(self.num_gpu_blocks, *key_block_shape),
+                    dtype=self.dtype,
+                    device=device,
+                )
+                value_blocks = torch.empty(
+                    size=(self.num_gpu_blocks, *value_block_shape),
+                    dtype=self.dtype,
+                    device=device,
+                )
+                gpu_cache.append((key_blocks, value_blocks))
+            cache_group[layers_range] = gpu_cache
+        return cache_group
 
     def allocate_cpu_cache(self) -> List[KVCache]:
         cpu_cache: List[KVCache] = []

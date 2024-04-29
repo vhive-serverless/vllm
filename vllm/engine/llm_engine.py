@@ -180,7 +180,7 @@ class LLMEngine:
             is_driver_worker=True,
         )
         self._run_workers("init_model")
-        self._run_workers("load_model")
+        self._run_workers("load_liquid_model")
 
     def _init_tokenizer(self, **tokenizer_init_kwargs):
         init_kwargs = dict(

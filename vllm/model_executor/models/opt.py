@@ -144,7 +144,7 @@ class OPTDecoderLayer(nn.Module):
             bias=config.enable_bias,
             linear_method=linear_method,
         )
-        self.final_layer_norm = nn.LayerNorm(
+        self.final_layer_norm:nn.LayerNorm = nn.LayerNorm(
             self.embed_dim,
             elementwise_affine=config.layer_norm_elementwise_affine)
 
@@ -195,17 +195,17 @@ class OPTDecoder(nn.Module):
         self.max_target_positions = config.max_position_embeddings
         self.vocab_size = config.vocab_size
 
-        self.embed_tokens = VocabParallelEmbedding(
+        self.embed_tokens:VocabParallelEmbedding = VocabParallelEmbedding(
             config.vocab_size,
             config.word_embed_proj_dim,
         )
         # Positional embeddings are replicated (not sharded).
-        self.embed_positions = OPTLearnedPositionalEmbedding(
+        self.embed_positions:OPTLearnedPositionalEmbedding = OPTLearnedPositionalEmbedding(
             config.max_position_embeddings, config.hidden_size)
 
         # Project out & in will be replicated if they exist.
         if config.word_embed_proj_dim != config.hidden_size:
-            self.project_out = ReplicatedLinear(config.hidden_size,
+            self.project_out:ReplicatedLinear = ReplicatedLinear(config.hidden_size,
                                                 config.word_embed_proj_dim,
                                                 bias=False,
                                                 linear_method=linear_method)
@@ -213,7 +213,7 @@ class OPTDecoder(nn.Module):
             self.project_out = None
 
         if config.word_embed_proj_dim != config.hidden_size:
-            self.project_in = ReplicatedLinear(config.word_embed_proj_dim,
+            self.project_in:ReplicatedLinear = ReplicatedLinear(config.word_embed_proj_dim,
                                                config.hidden_size,
                                                bias=False,
                                                linear_method=linear_method)
@@ -231,7 +231,7 @@ class OPTDecoder(nn.Module):
         else:
             self.final_layer_norm = None
 
-        self.layers = nn.ModuleList([
+        self.layers:nn.ModuleList = nn.ModuleList([
             OPTDecoderLayer(config, linear_method)
             for _ in range(config.num_hidden_layers)
         ])
@@ -268,7 +268,7 @@ class OPTModel(nn.Module):
         linear_method: Optional[LinearMethodBase] = None,
     ):
         super().__init__()
-        self.decoder = OPTDecoder(config, linear_method)
+        self.decoder:OPTDecoder = OPTDecoder(config, linear_method)
 
     def forward(
         self,
@@ -290,7 +290,7 @@ class OPTForCausalLM(nn.Module):
         super().__init__()
         self.config = config
         self.linear_method = linear_method
-        self.model = OPTModel(config, linear_method)
+        self.model:OPTModel = OPTModel(config, linear_method)
         self.lm_head_weight = self.model.decoder.embed_tokens.weight
         self.sampler = Sampler(config.vocab_size)
 

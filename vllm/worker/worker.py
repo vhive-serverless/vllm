@@ -20,6 +20,7 @@ from vllm.worker.cache_engine import CacheEngine
 from vllm.worker.model_runner import ModelRunner
 from vllm.lora.request import LoRARequest
 from vllm.utils import is_hip
+from vllm.model_executor.liquid_models import LIQUIDCONFIG, LiquidConfigType, LIQUID_DEVICE_SET
 
 
 class Worker:
@@ -81,12 +82,18 @@ class Worker:
 
             # This env var set by Ray causes exceptions with graph building.
             os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
-            self.device = torch.device(f"cuda:{self.local_rank}")
-            torch.cuda.set_device(self.device)
+            self.device_set = LIQUID_DEVICE_SET
+            # self.device = torch.device(f"cuda:{self.local_rank}")
+            self.init_gpu_memory_map : Dict[torch.cuda.device: float] = {}
+            for device in self.device_set:
+                torch.cuda.set_device(device)
 
-            _check_if_gpu_supports_dtype(self.model_config.dtype)
-            torch.cuda.empty_cache()
-            self.init_gpu_memory = torch.cuda.mem_get_info()[0]
+                _check_if_gpu_supports_dtype(self.model_config.dtype)
+                torch.cuda.empty_cache()
+                self.init_gpu_memory_map[device] = torch.cuda.mem_get_info()[0]
+            # sets back after init model
+            torch.cuda.set_device("cuda:0")
+            
         else:
             raise RuntimeError(
                 f"Not support device type: {self.device_config.device}")
@@ -98,6 +105,9 @@ class Worker:
 
     def load_model(self):
         self.model_runner.load_model()
+
+    def load_liquid_model(self):
+        self.model_runner.load_liquid_model()
 
     @torch.inference_mode()
     def profile_num_available_blocks(
@@ -117,7 +127,10 @@ class Worker:
         """
         # Profile the memory usage of the model and get the maximum number of
         # cache blocks that can be allocated with the remaining free memory.
-        torch.cuda.empty_cache()
+        for device in LIQUID_DEVICE_SET: 
+            torch.cuda.set_device(device)
+            torch.cuda.empty_cache()
+        torch.cuda.set_device("cuda:0")
 
         # Execute a forward pass with dummy inputs to profile the memory usage
         # of the model.
@@ -126,24 +139,30 @@ class Worker:
         # Calculate the number of blocks that can be allocated with the
         # profiled peak memory.
         torch.cuda.synchronize()
-        free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
+        min_gpu_blocks = float('inf')
+        for device in LIQUID_DEVICE_SET:
+            torch.cuda.set_device(device)
+            free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info(device=device)
         # NOTE(woosuk): Here we assume that the other processes using the same
         # GPU did not change their memory usage during the profiling.
-        peak_memory = self.init_gpu_memory - free_gpu_memory
+            peak_memory = self.init_gpu_memory_map[device] - free_gpu_memory
 
-        cache_block_size = CacheEngine.get_cache_block_size(
-            block_size, cache_dtype, self.model_config, self.parallel_config)
-        num_gpu_blocks = int(
-            (total_gpu_memory * gpu_memory_utilization - peak_memory) //
-            cache_block_size)
-        num_cpu_blocks = int(cpu_swap_space // cache_block_size)
-        num_gpu_blocks = max(num_gpu_blocks, 0)
-        num_cpu_blocks = max(num_cpu_blocks, 0)
-        if self.model_runner.lora_manager:
-            self.model_runner.remove_all_loras()
-        gc.collect()
-        torch.cuda.empty_cache()
-        return num_gpu_blocks, num_cpu_blocks
+            cache_block_size = CacheEngine.get_cache_block_size(
+                block_size, cache_dtype, self.model_config, self.parallel_config)
+            num_gpu_blocks = int(
+                (total_gpu_memory * gpu_memory_utilization - peak_memory) //
+                cache_block_size)
+            num_cpu_blocks = int(cpu_swap_space // cache_block_size)
+            num_gpu_blocks = max(num_gpu_blocks, 0)
+            num_cpu_blocks = max(num_cpu_blocks, 0)
+            if self.model_runner.lora_manager:
+                self.model_runner.remove_all_loras()
+            gc.collect()
+            torch.cuda.empty_cache()
+            min_gpu_blocks = min(min_gpu_blocks, num_gpu_blocks)
+
+        torch.cuda.set_device("cuda:0")
+        return 1000, num_cpu_blocks
 
     def init_cache_engine(self, cache_config: CacheConfig) -> None:
         self.cache_config = cache_config
@@ -151,6 +170,7 @@ class Worker:
                                         self.parallel_config)
         self.cache_events = self.cache_engine.events
         self.gpu_cache = self.cache_engine.gpu_cache
+        self.cache_group = self.cache_engine.cache_group
         self.model_runner.set_block_size(self.cache_engine.block_size)
 
     def warm_up_model(self) -> None:
@@ -221,7 +241,7 @@ class Worker:
             return {}
 
         output = self.model_runner.execute_model(seq_group_metadata_list,
-                                                 self.gpu_cache)
+                                                 self.cache_group)
         return output
 
     def add_lora(self, lora_request: LoRARequest) -> bool:

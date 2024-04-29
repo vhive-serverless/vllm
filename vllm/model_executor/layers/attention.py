@@ -126,6 +126,13 @@ class PagedAttention(nn.Module):
         # If key_cache and value_cache are not provided, the new key and value
         # vectors will not be cached. This happens during the initial memory
         # profiling run.
+        print(f"attention[PagedAttention.forward()]: Before reshape_and_cache, try access gpu memory...",end='')
+        try:
+            torch.cuda.synchronize()
+        except Exception as e:
+            print(f"Fail! {e}")
+            exit(1)
+        print("Success")
         if key_cache is not None and value_cache is not None:
             cache_ops.reshape_and_cache(
                 key,
@@ -136,6 +143,13 @@ class PagedAttention(nn.Module):
                 input_metadata.kv_cache_dtype,
             )
 
+        print(f"attention[PagedAttention.forward()]: After reshape_and_cache, try access gpu memory...",end='')
+        try:
+            torch.cuda.synchronize()
+        except Exception as e:
+            print(f"Fail! \n{e}")
+            exit(1)
+        print("Success")
         if input_metadata.is_prompt:
             # normal attention
             if (key_cache is None or value_cache is None
