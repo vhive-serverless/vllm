@@ -8,5 +8,5 @@ LIQUIDCONFIG : LiquidConfigType = {
     (6,12):torch.device(1)
 }
 
-# LIQUID_DEVICE_SET = [torch.cuda.device(1), torch.cuda.device(1)]
+# LIQUID_DEVICE_SET = [torch.cuda.device(0), torch.cuda.device(1)]
 LIQUID_DEVICE_SET = [torch.cuda.device(1)]

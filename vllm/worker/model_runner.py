@@ -370,24 +370,25 @@ class ModelRunner:
                 block_tables.append([])
             batch_size = graph_batch_size
 
+        device = "cuda:0"
         input_tokens = _make_tensor_with_pad(input_tokens,
                                              max_len=1,
                                              pad=0,
                                              dtype=torch.long,
-                                             device=self.device)
+                                             device=device)
         input_positions = _make_tensor_with_pad(input_positions,
                                                 max_len=1,
                                                 pad=0,
                                                 dtype=torch.long,
-                                                device=self.device)
+                                                device=device)
         slot_mapping = _make_tensor_with_pad(slot_mapping,
                                              max_len=1,
                                              pad=_PAD_SLOT_ID,
                                              dtype=torch.long,
-                                             device=self.device)
+                                             device=device)
         context_lens = torch.tensor(context_lens,
                                     dtype=torch.int,
-                                    device=self.device)
+                                    device=device)
 
         if use_captured_graph:
             # The shape of graph_block_tables is
@@ -626,7 +627,7 @@ class ModelRunner:
             input_metadata=input_metadata,
         )
         # Sample the next token.
-        # sampling_metadata.to("cuda:1")
+        sampling_metadata.to(hidden_states.device)
         output = self.model.sample(
             hidden_states=hidden_states,
             sampling_metadata=sampling_metadata,
