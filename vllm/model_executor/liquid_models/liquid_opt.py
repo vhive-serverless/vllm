@@ -50,6 +50,8 @@ class OPTLiquid(OPTForCausalLM):
 
     def forward(self, input_ids: torch.Tensor, positions: torch.Tensor, cache_group: Dict[Slice, List[Tuple[torch.Tensor]]], input_metadata: InputMetadata) -> torch.Tensor:
         # forward must be performed after liquid
+        # input_ids = input_ids.to("cuda:1")
+        # positions = positions.to("cuda:1")
         assert self.liquid_to
         decoder = self.model.decoder
         inputs_embeds = decoder.embed_tokens(input_ids)
@@ -64,6 +66,7 @@ class OPTLiquid(OPTForCausalLM):
             
             kv_caches:List[Tuple[torch.Tensor]] = cache_group[layers_range]
             device = self.liquid_config[layers_range]
+            input_metadata.to(device)
             layers = decoder.layers[layers_range[0]:layers_range[1]]
 
             assert layers[0].fc1.weight.device == device

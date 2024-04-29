@@ -623,8 +623,8 @@ class ModelRunner:
             cache_group=cache_group,
             input_metadata=input_metadata,
         )
-
         # Sample the next token.
+        # sampling_metadata.to("cuda:1")
         output = self.model.sample(
             hidden_states=hidden_states,
             sampling_metadata=sampling_metadata,

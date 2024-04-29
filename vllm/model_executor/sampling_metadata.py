@@ -55,6 +55,17 @@ class SamplingMetadata:
             f"categorized_sample_indices={self.categorized_sample_indices}), "
             f"perform_sampling={self.perform_sampling})")
 
+    def to(self, device:torch.device) -> None:
+        self.selected_token_indices = self.selected_token_indices.to(device)
+        if self.categorized_sample_indices is not None:
+            for sampling_type in SamplingType:
+                sample_indices = self.categorized_sample_indices[sampling_type]
+                self.categorized_sample_indices[sampling_type] = sample_indices.to(device)
+        # if self.generators is not None:
+        #     for g in self.generators:
+        #         g = g
+
+
 
 @dataclass
 class SamplingTensors:
