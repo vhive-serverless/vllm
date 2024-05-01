@@ -72,12 +72,20 @@ class OPTLiquid(OPTForCausalLM):
             assert layers[0].fc1.weight.device == device
             if kv_caches[0][0] is not None:
                 assert kv_caches[0][0].device == device
+                print(f"kv_caches is on device: {device}, kv_caches.shape:{kv_caches[0][0].shape}")
 
             hidden_states = hidden_states.to(device)
+
+            torch.cuda.set_stream(torch.cuda.Stream(device=hidden_states.device))
+            torch.cuda.empty_cache()
+
             for i in range(len(layers)):
                 print(f"---------Entering layer {i+layers_range[0]}, device: {device}---------")
+                if kv_caches[i][0] is None:
+                    continue
                 layer = layers[i]
                 hidden_states = layer(hidden_states, kv_caches[i], input_metadata)
+            torch.cuda.synchronize()
 
         # after layers forwarding, send the hidden states back to cuda:0
         hidden_states = hidden_states.to("cuda:0")

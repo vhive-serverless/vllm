@@ -126,18 +126,16 @@ class PagedAttention(nn.Module):
         # If key_cache and value_cache are not provided, the new key and value
         # vectors will not be cached. This happens during the initial memory
         # profiling run.
-        device = key.device
-        stream = torch.cuda.Stream(device=device)
-        torch.cuda.set_stream(stream)
-        print(f"attention[PagedAttention.forward()]: Before reshape_and_cache, try access gpu memory...",end='')
+        print(f"attention[PagedAttention.forward()]: stream on cuda:{torch.cuda.current_device()}, Before reshape_and_cache, try access gpu memory...",end='')
         try:
+            _ = str(key.data)
             torch.cuda.synchronize()
         except Exception as e:
             print(f"Fail! {e}")
             exit(1)
         print("Success")
         if key_cache is not None and value_cache is not None:
-            cache_ops.reshape_and_cache(
+            self._reshape_and_cache(
                 key,
                 value,
                 key_cache,
@@ -145,9 +143,10 @@ class PagedAttention(nn.Module):
                 input_metadata.slot_mapping.flatten(),
                 input_metadata.kv_cache_dtype,
             )
-
-        print(f"attention[PagedAttention.forward()]: After reshape_and_cache, try access gpu memory...",end='')
+        
+        print(f"attention[PagedAttention.forward()]: stream on cuda:{torch.cuda.current_device()}, After reshape_and_cache, try access gpu memory...",end='')
         try:
+            _ = str(key.data)
             torch.cuda.synchronize()
         except Exception as e:
             print(f"Fail! \n{e}")
@@ -256,6 +255,30 @@ class PagedAttention(nn.Module):
         # Reshape the output tensor.
         return output.view(batch_size, seq_len, hidden_size)
 
+    def _reshape_and_cache(self, 
+                    key: torch.Tensor,
+                    value: torch.Tensor,
+                    key_cache: torch.Tensor,
+                    value_cache: torch.Tensor,
+                    slot_mapping: torch.Tensor,
+                    kv_cache_dtype: str,
+            ):
+        # python version of cache_ops.reshape and cache
+        num_tokens = key.shape[0]
+        block_size = key_cache.shape[2]
+        print(f"num_tokens: {num_tokens}, block_size:{block_size}")
+        reshaped_key = key.reshape(num_tokens, *key_cache[0, :, :, 0, :].shape)
+        block_indicies = torch.div(slot_mapping, block_size, rounding_mode="floor")
+        block_indicies = block_indicies.cpu().tolist()
+        block_offsets = slot_mapping % block_size
+        block_offsets = block_offsets.cpu().tolist()
+        print(f"reshaped_key.shape:{reshaped_key.shape}, key_cache.shape:{key_cache.shape}")
+        for i in range(num_tokens):
+            block_idx = block_indicies[i]
+            block_offset = block_offsets[i]
+            print(f"block_idx: {block_idx}, block_offset: {block_offset}")
+            key_cache[block_idx, :, :, block_offset, :] = reshaped_key[i]
+            value_cache[block_idx, :, :, block_offset] = value[i]
 
 def _make_alibi_bias(
     alibi_slopes: torch.Tensor,

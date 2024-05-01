@@ -134,7 +134,7 @@ class Worker:
 
         # Execute a forward pass with dummy inputs to profile the memory usage
         # of the model.
-        self.model_runner.profile_run()
+        # self.model_runner.profile_run()
 
         # Calculate the number of blocks that can be allocated with the
         # profiled peak memory.
@@ -162,7 +162,7 @@ class Worker:
             min_gpu_blocks = min(min_gpu_blocks, num_gpu_blocks)
 
         torch.cuda.set_device("cuda:0")
-        return 1000, num_cpu_blocks
+        return 10240, num_cpu_blocks
 
     def init_cache_engine(self, cache_config: CacheConfig) -> None:
         self.cache_config = cache_config

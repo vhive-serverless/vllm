@@ -606,6 +606,7 @@ class ModelRunner:
         self,
         seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
         cache_group: Dict[Slice, Tuple[torch.Tensor, torch.Tensor]],
+        is_profile: bool = False
     ) -> Optional[SamplerOutput]:
         (input_tokens, input_positions, input_metadata, sampling_metadata,
          lora_requests,
@@ -687,8 +688,8 @@ class ModelRunner:
         for layers_range in LIQUIDCONFIG:
             num_layers = layers_range[1] - layers_range[0]
             cache_group[layers_range] = [(None, None)] * num_layers 
-        self.execute_model(seqs, cache_group)
-        torch.cuda.synchronize()
+        self.execute_model(seqs, cache_group, is_profile=True)
+        torch.cuda.synchronize
         return
 
     def remove_all_loras(self) -> bool:
