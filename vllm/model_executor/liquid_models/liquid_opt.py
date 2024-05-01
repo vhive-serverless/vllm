@@ -72,7 +72,7 @@ class OPTLiquid(OPTForCausalLM):
             assert layers[0].fc1.weight.device == device
             if kv_caches[0][0] is not None:
                 assert kv_caches[0][0].device == device
-                print(f"kv_caches is on device: {device}, kv_caches.shape:{kv_caches[0][0].shape}")
+                print(f"kv_caches is on device: {device}, key_caches.shape:{kv_caches[0][0].shape}, val_caches.shape:{kv_caches[0][1].shape}")
 
             hidden_states = hidden_states.to(device)
 
