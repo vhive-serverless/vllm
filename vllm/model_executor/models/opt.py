@@ -103,7 +103,7 @@ class OPTAttention(nn.Module):
         # torch.cuda.empty_cache()
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.chunk(chunks=3, dim=-1)
-        key_cache, value_cache = kv_cache
+        key_cache, value_cache, _ = kv_cache
         attn_output = self.attn(q, k, v, key_cache, value_cache,
                                 input_metadata)
         output, _ = self.out_proj(attn_output)

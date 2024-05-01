@@ -102,7 +102,7 @@ class CacheEngine:
             key_block_shape = self.get_key_block_shape()
             value_block_shape = self.get_value_block_shape()
             for _ in range(layers_range[1] - layers_range[0]):
-                key_blocks = torch.empty(
+                empty_blocks = torch.empty(
                     size=(self.num_gpu_blocks, *key_block_shape),
                     dtype=self.dtype,
                     device=device,
@@ -112,7 +112,12 @@ class CacheEngine:
                     dtype=self.dtype,
                     device=device,
                 )
-                gpu_cache.append((key_blocks, value_blocks))
+                key_blocks = torch.empty(
+                    size=(self.num_gpu_blocks, *key_block_shape),
+                    dtype=self.dtype,
+                    device=device,
+                )
+                gpu_cache.append((key_blocks, value_blocks, empty_blocks))
             cache_group[layers_range] = gpu_cache
         return cache_group
 

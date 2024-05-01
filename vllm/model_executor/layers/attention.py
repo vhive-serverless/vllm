@@ -143,7 +143,6 @@ class PagedAttention(nn.Module):
             value_cache.to(device)
             slot_mapping = input_metadata.slot_mapping.flatten()
             slot_mapping = slot_mapping.to(device)
-            key_cache = torch.zeros(key_cache.shape, device=key_cache.device)
             torch.cuda.set_device(device)
             cache_ops.reshape_and_cache(
                 key,
