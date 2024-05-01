@@ -213,7 +213,7 @@ __global__ void reshape_and_cache_kernel(
       assert(false);
 #endif
     } else {
-      key_cache[tgt_key_idx] = tgt_value;
+      key_cache[tgt_key_idx] = tgt_key;
       value_cache[tgt_value_idx] = tgt_value;
     }
   }
