@@ -12,6 +12,8 @@
 #include <cassert>
 #include <map>
 #include <vector>
+#include <iostream>
+#include <cuda_runtime_api.h>
 
 #ifdef USE_ROCM
   #include <hip/hip_bf16.h>
@@ -233,6 +235,9 @@ void reshape_and_cache(
   torch::Tensor& slot_mapping,  // [num_tokens]
   const std::string& kv_cache_dtype)
 {
+  int deviceIdx;
+  cudaGetDevice(&deviceIdx);
+  std::cout << "Current device index: " << deviceIdx << std::endl;
   int num_tokens = key.size(0);
   int num_heads = key.size(1);
   int head_size = key.size(2);
@@ -245,7 +250,10 @@ void reshape_and_cache(
   dim3 grid(num_tokens);
   dim3 block(std::min(num_heads * head_size, 512));
   const at::cuda::OptionalCUDAGuard device_guard(device_of(key));
-  const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  cudaStream_t stream;
+  cudaStreamCreate(&stream);
+
+
   if (kv_cache_dtype == "auto") {
     if (key.dtype() == at::ScalarType::Float) {
       CALL_RESHAPE_AND_CACHE(float, float, false);

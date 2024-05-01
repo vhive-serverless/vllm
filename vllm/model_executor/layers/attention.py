@@ -126,6 +126,7 @@ class PagedAttention(nn.Module):
         # If key_cache and value_cache are not provided, the new key and value
         # vectors will not be cached. This happens during the initial memory
         # profiling run.
+        device = key.device
         print(f"attention[PagedAttention.forward()]: stream on cuda:{torch.cuda.current_device()}, Before reshape_and_cache, try access gpu memory...",end='')
         try:
             _ = str(key.data)
@@ -135,12 +136,19 @@ class PagedAttention(nn.Module):
             exit(1)
         print("Success")
         if key_cache is not None and value_cache is not None:
-            self._reshape_and_cache(
+            print(key.device, value.device, key_cache.device, value_cache.device, input_metadata.slot_mapping.flatten().device)
+            key = key.to(device)
+            value = value.to(device)
+            value_cache.to(device)
+            slot_mapping = input_metadata.slot_mapping.flatten()
+            slot_mapping = slot_mapping.to(device)
+            torch.cuda.set_device(device)
+            cache_ops.reshape_and_cache(
                 key,
                 value,
                 key_cache,
                 value_cache,
-                input_metadata.slot_mapping.flatten(),
+                slot_mapping,
                 input_metadata.kv_cache_dtype,
             )
         
@@ -346,6 +354,14 @@ def _paged_attention(
         max_num_partitions == 1 or num_seqs * num_heads > 512)
     if use_v1:
         # Run PagedAttention V1.
+        print(f"Before paged_attention_v1...", end='')
+        try:
+            torch.cuda.synchronize()
+        except Exception as e:
+            print(f"Error:\n{e}")
+            exit(1)
+        print(f"Success")
+         
         ops.paged_attention_v1(
             output,
             query,
@@ -360,6 +376,13 @@ def _paged_attention(
             alibi_slopes,
             input_metadata.kv_cache_dtype,
         )
+        print(f"After paged_attention_v1...", end='')
+        try:
+            torch.cuda.synchronize()
+        except Exception as e:
+            print(f"Error:\n{e}")
+            exit(1)
+        print(f"Success")
     else:
         # Run PagedAttention V2.
         assert _PARTITION_SIZE % block_size == 0
