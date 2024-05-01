@@ -211,6 +211,7 @@ class PagedAttention(nn.Module):
                     key = key.unflatten(0, (batch_size, seq_len))
                     value = value.unflatten(0, (batch_size, seq_len))
 
+                torch.cuda.synchronize()
                 out = xops.memory_efficient_attention_forward(
                     query,
                     key,
@@ -221,9 +222,11 @@ class PagedAttention(nn.Module):
                     op=xops.fmha.MemoryEfficientAttentionFlashAttentionOp[0] if
                     (is_hip()) else None,
                 )
+                torch.cuda.synchronize()
                 output = out.view_as(query)
             else:
                 # prefix-enabled attention
+                print(f"Going on second branch")
                 output = torch.empty_like(query)
                 context_attention_fwd(
                     query,
@@ -239,6 +242,8 @@ class PagedAttention(nn.Module):
                     input_metadata.max_seq_len,
                     getattr(self, "alibi_slopes", None),
                 )
+                
+
 
         else:
             # Decoding run.
@@ -265,7 +270,7 @@ class PagedAttention(nn.Module):
             ):
         # python version of cache_ops.reshape and cache
         num_tokens = key.shape[0]
-        block_size = key_cache.shape[2]
+        block_size = key_cache.shape[3]
         print(f"num_tokens: {num_tokens}, block_size:{block_size}")
         reshaped_key = key.reshape(num_tokens, *key_cache[0, :, :, 0, :].shape)
         block_indicies = torch.div(slot_mapping, block_size, rounding_mode="floor")
