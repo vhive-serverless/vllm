@@ -84,7 +84,7 @@ class OPTLiquid(OPTForCausalLM):
                 if kv_caches[i][0] is None:
                     continue
                 layer = layers[i]
-                layer(hidden_states, kv_caches[i], input_metadata)
+                hidden_states = layer(hidden_states, kv_caches[i], input_metadata)
             torch.cuda.synchronize()
 
         # after layers forwarding, send the hidden states back to cuda:0

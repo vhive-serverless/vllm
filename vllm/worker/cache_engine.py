@@ -107,13 +107,13 @@ class CacheEngine:
                     dtype=self.dtype,
                     device=device,
                 )
-                value_blocks = torch.empty(
-                    size=(self.num_gpu_blocks, *value_block_shape),
+                key_blocks = torch.empty(
+                    size=(self.num_gpu_blocks, *key_block_shape),
                     dtype=self.dtype,
                     device=device,
                 )
-                key_blocks = torch.empty(
-                    size=(self.num_gpu_blocks, *key_block_shape),
+                value_blocks = torch.empty(
+                    size=(self.num_gpu_blocks, *value_block_shape),
                     dtype=self.dtype,
                     device=device,
                 )

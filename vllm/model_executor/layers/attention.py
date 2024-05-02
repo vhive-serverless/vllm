@@ -128,7 +128,6 @@ class PagedAttention(nn.Module):
         # profiling run.
         device = key.device
         print(f"attention[PagedAttention.forward()]: stream on cuda:{torch.cuda.current_device()}, Before reshape_and_cache, try access gpu memory...",end='')
-        print(f"key.ptr: {key_cache.data_ptr()}, val.ptr: {value_cache.data_ptr()}")
         try:
             _ = str(key.data)
             torch.cuda.synchronize()
@@ -137,19 +136,12 @@ class PagedAttention(nn.Module):
             exit(1)
         print("Success")
         if key_cache is not None and value_cache is not None:
-            print(key.device, value.device, key_cache.device, value_cache.device, input_metadata.slot_mapping.flatten().device)
-            key = key.to(device)
-            value = value.to(device)
-            value_cache.to(device)
-            slot_mapping = input_metadata.slot_mapping.flatten()
-            slot_mapping = slot_mapping.to(device)
-            torch.cuda.set_device(device)
             cache_ops.reshape_and_cache(
                 key,
                 value,
-                value_cache,
                 key_cache,
-                slot_mapping,
+                value_cache,
+                input_metadata.slot_mapping,
                 input_metadata.kv_cache_dtype,
             )
         
