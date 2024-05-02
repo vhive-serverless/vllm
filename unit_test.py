@@ -5,8 +5,6 @@ import torch
 from typing import Tuple
 
 from vllm._C import cache_ops
-from vllm.utils import is_hip
-from vllm.utils import create_kv_caches_with_random
 
 
 
@@ -19,12 +17,14 @@ def test_reshape_and_cache(
     dtype: torch.dtype,
     seed: int,
     device: str,
+    key_cache: torch.Tensor,
+    value_cache: torch.Tensor
 ) -> None:
     random.seed(seed)
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
-    torch.set_default_device(device="cuda:0")
+    torch.set_default_device(device=device)
     # Create a random slot mapping.
     num_slots = block_size * num_blocks
     slot_mapping = random.sample(range(num_slots), num_tokens)
@@ -32,20 +32,8 @@ def test_reshape_and_cache(
 
     qkv = torch.randn(num_tokens, 3, num_heads, head_size, dtype=dtype)
     _, key, value = qkv.unbind(dim=1)
-    print(f"on device: {key.device}, data_ptr: {key.data_ptr()}")
-    key = key.to(device)
-    print(f"on device: {key.device}, data_ptr: {key.data_ptr()}")
-    value = value.to(device)
-    slot_mapping = slot_mapping.to(device)
-    print(f"key.device: {key.device}")
 
-    # Create the KV caches.
-    key_caches, value_caches = create_kv_caches_with_random(num_blocks, block_size, 1,
-                                                num_heads, head_size, dtype,
-                                                None, seed, device)
-    key_cache, value_cache = key_caches[0], value_caches[0]
 
-    print(key.device, value.device, key_cache.device, value_cache.device, slot_mapping.device)
     # Call the reshape_and_cache kernel.
     cache_ops.reshape_and_cache(key, value, key_cache, value_cache,
                                 slot_mapping, "auto")
@@ -65,16 +53,30 @@ if __name__ == '__main__':
         f"cuda:{i}" for i in range(2)
     ]
     DTYPES = torch.float
+    x = 8
+    kv_caches = []
+
     for device in CUDA_DEVICES:
-        for i in range(6):
-            test_reshape_and_cache(
-                num_tokens = NUM_TOKENS,
-                num_heads=NUM_HEADS,
-                head_size=HEAD_SIZES,
-                block_size=BLOCK_SIZES,
-                num_blocks=NUM_BLOCKS,
-                dtype=DTYPES,
-                seed=SEEDS,
-                device=device,
-            )
+        key_cache = torch.empty(size=(NUM_BLOCKS, NUM_HEADS, HEAD_SIZES // x, BLOCK_SIZES, x ), dtype=DTYPES, device=device)
+        value_cache = torch.empty(size=(NUM_BLOCKS, NUM_HEADS, HEAD_SIZES, BLOCK_SIZES), dtype=DTYPES, device=device)
+
+        kv_caches.append((key_cache, value_cache))
+
+    for i, device in enumerate(CUDA_DEVICES):
+        key_cache, value_cache = kv_caches[i]
+        test_reshape_and_cache(
+            num_tokens = NUM_TOKENS,
+            num_heads=NUM_HEADS,
+            head_size=HEAD_SIZES,
+            block_size=BLOCK_SIZES,
+            num_blocks=NUM_BLOCKS,
+            dtype=DTYPES,
+            seed=SEEDS,
+            device=device,
+            key_cache=key_cache,
+            value_cache=value_cache
+        )
+        try:
             torch.cuda.synchronize()
+        except Exception as e:
+            print(f"GPU memory is broken, error:\n{e}")

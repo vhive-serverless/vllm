@@ -102,12 +102,13 @@ class CacheEngine:
             gpu_cache: List[KVCache] = []
             key_block_shape = self.get_key_block_shape()
             value_block_shape = self.get_value_block_shape()
+            # We need to allocate an empty block at first to avoid bugs when runing pipeline parallelism with multi-device on single node. Only god knows the reason, might be a bug for pytorch. 
+            empty_blocks = torch.empty(
+                size=(self.num_gpu_blocks, *key_block_shape),
+                dtype=self.dtype,
+                device=device,
+            )
             for _ in range(layers_range[1] - layers_range[0]):
-                empty_blocks = torch.empty(
-                    size=(self.num_gpu_blocks, *key_block_shape),
-                    dtype=self.dtype,
-                    device=device,
-                )
                 key_blocks = torch.empty(
                     size=(self.num_gpu_blocks, *key_block_shape),
                     dtype=self.dtype,
@@ -118,6 +119,7 @@ class CacheEngine:
                     dtype=self.dtype,
                     device=device,
                 )
+                # gpu_cache.append((key_blocks, value_blocks, empty_blocks))
                 gpu_cache.append((key_blocks, value_blocks, empty_blocks))
             cache_group[layers_range] = gpu_cache
         return cache_group
