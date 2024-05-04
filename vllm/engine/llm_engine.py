@@ -83,6 +83,7 @@ class LLMEngine:
         lora_config: Optional[LoRAConfig],
         placement_group: Optional["PlacementGroup"],
         log_stats: bool,
+        metrics_record: bool = True,
         local_rank: int = 0,
     ) -> None:
         logger.info(
@@ -113,6 +114,7 @@ class LLMEngine:
         self.scheduler_config = scheduler_config
         self.device_config = device_config
         self.log_stats = log_stats
+        self.metrics_record = metrics_record
         self.local_rank = local_rank
         self._verify_args()
 
@@ -141,6 +143,9 @@ class LLMEngine:
                 local_interval=_LOCAL_LOGGING_INTERVAL_SEC,
                 labels=dict(model_name=model_config.model))
             self.stat_logger.info("cache_config", self.cache_config)
+
+        if self.metrics_record:
+            self.metrics = List[Stats]
 
         self.forward_dag = None
         if USE_RAY_COMPILED_DAG:
@@ -780,8 +785,22 @@ class LLMEngine:
         # Log stats.
         if self.log_stats:
             self.stat_logger.log(self._get_stats(scheduler_outputs))
+        
+        # metrics record
+        if self.metrics_record:
+            self.metrics.append(self._get_stats(scheduler_outputs))
 
         return request_outputs
+
+    def get_latest_metrics(self) -> Stats:
+        """Get the latest metrics."""
+        if not self.metrics or len(self.metrics) == 0:
+            return self._get_stats(scheduler_outputs=None)
+        return self.metrics[-1]
+    
+    def get_metrics_history(self) -> List[Stats]:
+        """Get the metrics history."""
+        return self.metrics
 
     def step(self) -> List[RequestOutput]:
         """Performs one decoding iteration and returns newly generated results.
