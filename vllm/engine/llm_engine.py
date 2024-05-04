@@ -12,7 +12,7 @@ from vllm.config import (CacheConfig, DeviceConfig, ModelConfig,
                          ParallelConfig, SchedulerConfig, LoRAConfig)
 from vllm.core.scheduler import Scheduler, SchedulerOutputs
 from vllm.engine.arg_utils import EngineArgs
-from vllm.engine.metrics import StatLogger, Stats
+from vllm.engine.metrics import StatLogger, Stats, EngineMetrics
 from vllm.engine.ray_utils import RayWorkerVllm, initialize_cluster, ray
 from vllm.logger import init_logger
 from vllm.outputs import RequestOutput
@@ -145,7 +145,8 @@ class LLMEngine:
             self.stat_logger.info("cache_config", self.cache_config)
 
         if self.metrics_record:
-            self.metrics = List[Stats]
+            self.metrics: List[EngineMetrics] = []
+            self.total_tokens: int = 0
 
         self.forward_dag = None
         if USE_RAY_COMPILED_DAG:
@@ -788,17 +789,21 @@ class LLMEngine:
         
         # metrics record
         if self.metrics_record:
-            self.metrics.append(self._get_stats(scheduler_outputs))
+            stats = self._get_stats(scheduler_outputs)
+            finished_tokens = sum(len(output.prompt_token_ids) + sum(len(output_tokens.token_ids)
+                                  for output_tokens in output.outputs) for output in request_outputs if output.finished)
+            self.metrics.append(self._stats_to_metrics(stats, finished_tokens))
 
         return request_outputs
 
-    def get_latest_metrics(self) -> Stats:
+    def get_latest_metrics(self) -> EngineMetrics:
         """Get the latest metrics."""
         if not self.metrics or len(self.metrics) == 0:
-            return self._get_stats(scheduler_outputs=None)
+            stats = self._get_stats(scheduler_outputs=None)
+            return self._stats_to_metrics(stats)
         return self.metrics[-1]
     
-    def get_metrics_history(self) -> List[Stats]:
+    def get_metrics_history(self) -> List[EngineMetrics]:
         """Get the metrics history."""
         return self.metrics
 
@@ -946,6 +951,21 @@ class LLMEngine:
             time_to_first_tokens=time_to_first_tokens,
             time_per_output_tokens=time_per_output_tokens,
             time_e2e_requests=time_e2e_requests,
+        )
+    
+    def _stats_to_metrics(self, stats: Stats, finished_tokens: int = 0) -> EngineMetrics:
+        self.total_tokens += stats.num_prompt_tokens + stats.num_generation_tokens - finished_tokens
+        return EngineMetrics(
+            now=stats.now,
+            num_running=stats.num_running,
+            num_swapped=stats.num_swapped,
+            num_waiting=stats.num_waiting,
+            gpu_cache_usage=stats.gpu_cache_usage,
+            cpu_cache_usage=stats.cpu_cache_usage,
+            num_prompt_tokens=stats.num_prompt_tokens,
+            num_generation_tokens=stats.num_generation_tokens,
+            num_output_tokens=finished_tokens,
+            num_total_tokens=self.total_tokens,
         )
 
     def _decode_sequence(self, seq: Sequence, prms: SamplingParams) -> None:

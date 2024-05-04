@@ -24,3 +24,14 @@ for output in outputs_1:
     prompt = output.prompt
     generated_text = output.outputs[0].text
     print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
+
+metrics_0 = llm_0.llm_engine.get_metrics_history()
+print(f"----------------Metrics for local_rank 0:----------------")
+for metrics in metrics_0:
+    print(metrics)
+
+metrics_1 = llm_1.llm_engine.get_metrics_history()
+print(f"----------------Metrics for local_rank 1:----------------")
+print(metrics_1)
+for metrics in metrics_1:
+    print(metrics)
