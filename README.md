@@ -16,7 +16,7 @@ Easy, fast, and cheap LLM serving for everyone
 
 ---
 # Multi Device Support
-Modify vllm so that it can support running on multiple GPU on one node.
+Modify vllm so that it can support running on multiple GPU(s) on one node.
 
 Usage:
 ```
