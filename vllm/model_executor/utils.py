@@ -45,7 +45,13 @@ def set_weight_attrs(
 
 def get_model(model_config: ModelConfig, device_config: DeviceConfig,
               **kwargs) -> torch.nn.Module:
-    model_loader_module = DEVICE_TO_MODEL_LOADER_MAP[device_config.device_type]
+    device_type = "neuron"
+    if "cuda" not in device_config.device_type:
+        device_type = "neuron"
+    else:
+        device_type = "cuda"
+        
+    model_loader_module = DEVICE_TO_MODEL_LOADER_MAP[device_type]
     imported_model_loader = importlib.import_module(
         f"vllm.model_executor.{model_loader_module}")
     get_model_fn = imported_model_loader.get_model
