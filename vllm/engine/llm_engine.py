@@ -156,8 +156,14 @@ class LLMEngine:
         return self.tokenizer.get_lora_tokenizer(sequence.lora_request)
 
     def _dispatch_worker(self):
+        device_type = "neuron"
+        if "cuda" not in self.device_config.device_type:
+            device_type = "neuron"
+        # "cuda" in self.device_config.device_type
+        else:
+            device_type = "cuda"
         worker_module = DEVICE_TO_WORKER_MODULE_MAP[
-            self.device_config.device_type]
+            device_type]
         imported_worker = importlib.import_module(worker_module)
         Worker = imported_worker.Worker
         return Worker
