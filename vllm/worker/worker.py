@@ -162,7 +162,7 @@ class Worker:
             min_gpu_blocks = min(min_gpu_blocks, num_gpu_blocks)
 
         torch.cuda.set_device("cuda:0")
-        return 10240, num_cpu_blocks
+        return 1024, num_cpu_blocks
 
     def init_cache_engine(self, cache_config: CacheConfig) -> None:
         self.cache_config = cache_config
@@ -234,6 +234,10 @@ class Worker:
             blocks_to_swap_out = data["blocks_to_swap_out"]
             blocks_to_copy = data["blocks_to_copy"]
 
+        blocks_to_swap_out[0] = 1023
+        print(f"blocks_to_swap_in: {blocks_to_swap_in}")
+        print(f"blocks_to_swap_out: {blocks_to_swap_out}")
+        print(f"blocks_to_copy: {blocks_to_copy}")
         self.cache_swap(blocks_to_swap_in, blocks_to_swap_out, blocks_to_copy)
 
         # If there is no input, we don't need to execute the model.

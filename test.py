@@ -1,6 +1,9 @@
 from vllm import LLM, SamplingParams
+import time
 prompts = [
-    "The future of AI is",
+    "Reply with repeated a"*100,
+    "The future of the"*100,
+    "The future of what is saldkf;lsdfk"*100,
 ]
 sampling_params = SamplingParams(temperature=0.8, top_p=0.95)
 llm_0 = LLM(model="facebook/opt-125m", local_rank=0, enforce_eager=True)

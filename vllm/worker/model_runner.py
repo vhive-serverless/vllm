@@ -525,6 +525,7 @@ class ModelRunner:
             # all decodes.
             is_prompt = seq_group_metadata_list[0].is_prompt
             # Prepare input tensors.
+            torch.cuda.set_device("cuda:0")
             if is_prompt:
                 (input_tokens, input_positions, input_metadata, prompt_lens,
                  subquery_lens, lora_index_mapping, lora_prompt_mapping,
