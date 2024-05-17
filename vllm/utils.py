@@ -3,6 +3,7 @@ import os
 import socket
 import subprocess
 import uuid
+import torch.nn as nn
 from platform import uname
 from typing import List, Tuple, Union
 from packaging.version import parse, Version
@@ -309,3 +310,18 @@ def create_kv_caches_with_random(
                 f"Does not support value cache of type {cache_dtype}")
         value_caches.append(value_cache)
     return key_caches, value_caches
+
+def count_tensor_bytes(tensor: torch.Tensor) -> int:
+    mem_in_bytes = tensor.numel() * tensor.element_size()
+    return mem_in_bytes
+
+def count_module_bytes(module: nn.Module) -> int:
+    total_size = 0
+    
+    for param in module.parameters():
+        total_size += param.numel() * param.element_size()
+    
+    for buffer in module.buffers():
+        total_size += buffer.numel() * buffer.element_size()
+    
+    return total_size

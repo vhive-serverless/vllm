@@ -50,6 +50,13 @@ class BlockAllocator:
     def get_num_free_blocks(self) -> int:
         return len(self.free_blocks)
 
+    def append_new_blocks(self, new_blocks_num: int) -> int:
+        for i in range(new_blocks_num):
+            block = PhysicalTokenBlock(device=self.device, block_number=i+self.num_blocks, block_size=self.block_size)
+            self.free_blocks.append(block)
+
+        self.num_blocks += new_blocks_num
+
 
 class AllocStatus(enum.Enum):
     """Result for BlockSpaceManager.can_allocate
@@ -96,6 +103,12 @@ class BlockSpaceManager:
                                             num_cpu_blocks)
         # Mapping: seq_id -> BlockTable.
         self.block_tables: Dict[int, BlockTable] = {}
+
+    def append_new_gpu_blocks(self, new_blocks_num: int) -> None:
+        self.gpu_allocator.append_new_blocks(new_blocks_num)
+        self.num_total_gpu_blocks += new_blocks_num
+
+
 
     def can_allocate(self, seq_group: SequenceGroup) -> AllocStatus:
         # FIXME(woosuk): Here we assume that all sequences in the group share

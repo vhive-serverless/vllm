@@ -11,6 +11,7 @@ from vllm.lora.request import LoRARequest
 from vllm.config import (CacheConfig, DeviceConfig, ModelConfig,
                          ParallelConfig, SchedulerConfig, LoRAConfig)
 from vllm.core.scheduler import Scheduler, SchedulerOutputs
+from vllm.core.place import PlaceRequest
 from vllm.engine.arg_utils import EngineArgs
 from vllm.engine.metrics import StatLogger, Stats, EngineMetrics
 from vllm.engine.ray_utils import RayWorkerVllm, initialize_cluster, ray
@@ -36,6 +37,7 @@ _LOCAL_LOGGING_INTERVAL_SEC = 5
 # A map between the device type (in device config) to its worker module.
 DEVICE_TO_WORKER_MODULE_MAP = {
     "cuda": "vllm.worker.worker",
+    "liquid": "vllm.worker.liquid_worker",
     "neuron": "vllm.worker.neuron_worker",
 }
 
@@ -162,6 +164,10 @@ class LLMEngine:
         # "cuda" in self.device_config.device_type
         else:
             device_type = "cuda"
+
+        if self.model_config.liquid:
+            device_type = "liquid"
+
         worker_module = DEVICE_TO_WORKER_MODULE_MAP[
             device_type]
         imported_worker = importlib.import_module(worker_module)
@@ -179,18 +185,33 @@ class LLMEngine:
         self.workers: List[Worker] = []
         distributed_init_method = get_distributed_init_method(
             get_ip(), get_open_port())
-        self.driver_worker = Worker(
-            self.model_config,
-            self.parallel_config,
-            self.scheduler_config,
-            self.device_config,
-            local_rank=self.local_rank,
-            rank=0,
-            distributed_init_method=distributed_init_method,
-            lora_config=self.lora_config,
-            kv_cache_dtype=self.cache_config.cache_dtype,
-            is_driver_worker=True,
-        )
+        if not self.model_config.liquid:
+            self.driver_worker = Worker(
+                self.model_config,
+                self.parallel_config,
+                self.scheduler_config,
+                self.device_config,
+                local_rank=self.local_rank,
+                rank=0,
+                distributed_init_method=distributed_init_method,
+                lora_config=self.lora_config,
+                kv_cache_dtype=self.cache_config.cache_dtype,
+                is_driver_worker=True,
+            )
+        else:
+            self.driver_worker = Worker(
+                self.model_config,
+                self.parallel_config,
+                self.scheduler_config,
+                self.device_config,
+                local_rank=self.local_rank,
+                rank=0,
+                distributed_init_method=distributed_init_method,
+                lora_config=self.lora_config,
+                kv_cache_dtype=self.cache_config.cache_dtype,
+                is_driver_worker=True,
+            )
+
         self._run_workers("init_model")
         self._run_workers("load_model")
 
@@ -408,6 +429,16 @@ class LLMEngine:
                      local_rank=engine_args.local_rank)
         return engine
 
+    def place(self,
+              layer_range: Tuple[int,int],
+              dest_gpu_id: int,
+              ) -> None:
+        logger.info(f"Going to place {layer_range} to cuda:{dest_gpu_id}")
+        new_blocks_num = self._run_workers("place", layer_range=layer_range, dest_gpu_id=dest_gpu_id)
+        # _run_workers would return a list of worker results, take the first one
+        new_blocks_num = new_blocks_num[0]
+        return new_blocks_num
+
     def encode_request(
         self,
         request_id: str,  # pylint: disable=unused-argument
@@ -421,6 +452,11 @@ class LLMEngine:
                                                      prompt=prompt,
                                                      lora_request=lora_request)
         return prompt_token_ids
+    def add_place_request(
+            self,
+            place_request: PlaceRequest,
+    ) -> None:
+        self.scheduler.place_queue.append(place_request)
 
     def add_request(
         self,
@@ -865,6 +901,20 @@ class LLMEngine:
             >>>         break
         """
         seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
+
+        place_request = scheduler_outputs.place_request
+        if place_request != None:
+            # If place request is not None, then do placement first
+            layer_range = place_request.layer_range
+            dest_gpu_id = place_request.dest_gpu_id
+            new_blocks_num = self.place(layer_range, dest_gpu_id)
+            if dest_gpu_id == self.model_config.head_device:
+                logger.warning(f"Merge other layers back to head device, currently doesn't support reduce kv cache memory")
+            else:
+                # modify scheduler to add new blocks
+                self.scheduler.append_blocks(new_blocks_num)
+                
+            
 
         if not scheduler_outputs.is_empty():
             # Execute the model.
