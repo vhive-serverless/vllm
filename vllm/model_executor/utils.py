@@ -10,6 +10,7 @@ from vllm.config import DeviceConfig, ModelConfig
 
 DEVICE_TO_MODEL_LOADER_MAP = {
     "cuda": "model_loader",
+    "liquid": "liquid_loader",
     "neuron": "neuron_model_loader",
 }
 
@@ -50,6 +51,9 @@ def get_model(model_config: ModelConfig, device_config: DeviceConfig,
         device_type = "neuron"
     else:
         device_type = "cuda"
+
+    if model_config.liquid:
+        device_type = "liquid"
         
     model_loader_module = DEVICE_TO_MODEL_LOADER_MAP[device_type]
     imported_model_loader = importlib.import_module(

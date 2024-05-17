@@ -52,3 +52,17 @@ class InputMetadata:
                 f"block_tables={self.block_tables}, "
                 f"use_cuda_graph={self.use_cuda_graph}, "
                 f"kv_cache_dtype={self.kv_cache_dtype})")
+
+    def to(self, device:torch.device) -> None:
+        self.slot_mapping = self.slot_mapping.to(device)
+        if self.prompt_lens is not None:
+            self.prompt_lens = self.prompt_lens.to(device)
+
+        if self.start_loc is not None:
+            self.start_loc = self.start_loc.to(device)
+
+        if self.context_lens is not None:
+            self.context_lens = self.context_lens.to(device)
+
+        if self.block_tables is not None:
+            self.block_tables = self.block_tables.to(device)

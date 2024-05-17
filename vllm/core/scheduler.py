@@ -7,6 +7,7 @@ from vllm.config import CacheConfig, LoRAConfig, SchedulerConfig
 from vllm.core.block_manager import AllocStatus, BlockSpaceManager
 from vllm.core.policy import PolicyFactory
 from vllm.lora.request import LoRARequest
+from vllm.core.place import PlaceRequest
 from vllm.logger import init_logger
 from vllm.sequence import (Sequence, SequenceData, SequenceGroup,
                            SequenceGroupMetadata, SequenceStatus)
@@ -39,6 +40,7 @@ class SchedulerOutputs:
         blocks_to_swap_out: Dict[int, int],
         blocks_to_copy: Dict[int, List[int]],
         ignored_seq_groups: List[SequenceGroup],
+        place_request: Optional[PlaceRequest],
     ) -> None:
         self.scheduled_seq_groups = scheduled_seq_groups
         self.prompt_run = prompt_run
@@ -53,6 +55,8 @@ class SchedulerOutputs:
         self.num_loras = len(self.lora_requests)
         if self.num_loras > 0:
             self._sort_by_lora_ids()
+
+        self.place_request = place_request
 
     def is_empty(self) -> bool:
         # NOTE: We do not consider the ignored sequence groups.
@@ -106,6 +110,12 @@ class Scheduler:
         self.running: Deque[SequenceGroup] = deque()
         # Sequence groups in the SWAPPED state.
         self.swapped: Deque[SequenceGroup] = deque()
+
+        # queue for place request
+        self.place_queue: Deque[PlaceRequest] = deque()
+
+    def append_blocks(self, new_blocks_num) -> None:
+        self.block_manager.append_new_gpu_blocks(new_blocks_num)
 
     @property
     def lora_enabled(self) -> bool:
@@ -167,6 +177,10 @@ class Scheduler:
         now = time.monotonic()
 
         # Join waiting sequences if possible.
+        place_request = None
+        if len(self.place_queue) > 0:
+            place_request = self.place_queue.popleft()
+            logger.info(f"Obtain place request with layer range: {place_request.layer_range}")
         if not self.swapped:
             ignored_seq_groups: List[SequenceGroup] = []
             scheduled: List[SequenceGroup] = []
@@ -254,7 +268,6 @@ class Scheduler:
                 scheduled.append(seq_group)
 
             self.waiting.extendleft(leftover_waiting_sequences)
-
             if scheduled or ignored_seq_groups:
                 scheduler_outputs = SchedulerOutputs(
                     scheduled_seq_groups=scheduled,
@@ -265,6 +278,7 @@ class Scheduler:
                     blocks_to_swap_out=blocks_to_swap_out,
                     blocks_to_copy=blocks_to_copy,
                     ignored_seq_groups=ignored_seq_groups,
+                    place_request=place_request
                 )
                 return scheduler_outputs
 
@@ -357,6 +371,7 @@ class Scheduler:
             blocks_to_swap_out=blocks_to_swap_out,
             blocks_to_copy=blocks_to_copy,
             ignored_seq_groups=[],
+            place_request=place_request
         )
         return scheduler_outputs
 

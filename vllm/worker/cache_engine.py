@@ -1,11 +1,11 @@
 """CacheEngine class for managing the KV cache."""
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 import torch
 
 from vllm.config import CacheConfig, ModelConfig, ParallelConfig
 from vllm.logger import init_logger
-from vllm.utils import in_wsl, is_neuron, STR_DTYPE_TO_TORCH_DTYPE
+from vllm.utils import in_wsl, is_neuron, STR_DTYPE_TO_TORCH_DTYPE, count_tensor_bytes
 
 logger = init_logger(__name__)
 
@@ -57,6 +57,44 @@ class CacheEngine:
         # Initialize the events for stream synchronization.
         self.events = [torch.cuda.Event() for _ in range(self.num_layers)]
 
+    def place(self, layer_range:Tuple[int,int], dest_gpu_id:int) -> int:
+        """Place layers to dest_gpu and returns number of bytes freed up by this placement
+        """
+        layer_start =  layer_range[0]
+        layer_end = layer_range[1]
+
+        bytes_freed = 0
+
+        for i in range(layer_start,layer_end):
+            self.gpu_cache[i][0] = self.gpu_cache[i][0].to(f"cuda:{dest_gpu_id}")
+            self.gpu_cache[i][1] = self.gpu_cache[i][1].to(f"cuda:{dest_gpu_id}")
+
+            bytes_freed += count_tensor_bytes(self.gpu_cache[i][0]) + count_tensor_bytes(self.gpu_cache[i][1])
+             
+        logger.info(f"KVCache between layer {layer_start} and {layer_end} is sent to cuda:{dest_gpu_id}, frees up: {bytes_freed/(1024**3):.1f} GB memory")
+        return bytes_freed
+
+    def extend_blocks(self, new_blocks_num: int) -> None:
+        self.num_gpu_blocks += new_blocks_num
+        key_block_shape = self.get_key_block_shape()
+        value_block_shape = self.get_value_block_shape()
+        for i in range(self.num_layers):
+            device = self.gpu_cache[i][0].device
+            key_blocks = torch.empty(
+                size=(new_blocks_num, *key_block_shape),
+                dtype=self.dtype,
+                device=device
+            )
+            self.gpu_cache[i][0] = torch.cat((self.gpu_cache[i][0], key_blocks),dim=0)
+            value_blocks = torch.empty(
+                size=(new_blocks_num, *value_block_shape),
+                dtype=self.dtype,
+                device=device
+            )
+            self.gpu_cache[i][1] = torch.cat((self.gpu_cache[i][1], value_blocks), dim=0)
+
+        
+        
     def get_key_block_shape(self) -> Tuple[int, int, int, int]:
         element_size = torch.tensor([], dtype=self.dtype).element_size()
         x = 16 // element_size
@@ -89,7 +127,7 @@ class CacheEngine:
                 dtype=self.dtype,
                 device="cuda",
             )
-            gpu_cache.append((key_blocks, value_blocks))
+            gpu_cache.append([key_blocks, value_blocks])
         return gpu_cache
 
     def allocate_cpu_cache(self) -> List[KVCache]:
@@ -158,10 +196,13 @@ class CacheEngine:
         cache_dtype: str,
         model_config: ModelConfig,
         parallel_config: ParallelConfig,
+        num_layers: Optional[int] = None,
     ) -> int:
         head_size = model_config.get_head_size()
         num_heads = model_config.get_num_kv_heads(parallel_config)
-        num_layers = model_config.get_num_layers(parallel_config)
+        # if num_layers is passed, directly use num_layers 
+        if num_layers == None:
+            num_layers = model_config.get_num_layers(parallel_config)
 
         key_cache_block = block_size * num_heads * head_size
         value_cache_block = key_cache_block
