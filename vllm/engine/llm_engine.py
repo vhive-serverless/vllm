@@ -962,7 +962,7 @@ class LLMEngine:
     def _stats_to_metrics(self, stats: Stats, finished_tokens: int = 0) -> EngineMetrics:
         self.total_tokens += stats.num_prompt_tokens + stats.num_generation_tokens - finished_tokens
         return EngineMetrics(
-            now=stats.now,
+            now=time.time(),
             num_running=stats.num_running,
             num_swapped=stats.num_swapped,
             num_waiting=stats.num_waiting,
