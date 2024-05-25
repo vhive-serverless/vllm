@@ -1,4 +1,6 @@
 import contextlib
+import pickle
+from multiprocessing import shared_memory
 import time
 from typing import Dict, List, Optional, Tuple, Set, Union
 
@@ -83,6 +85,31 @@ class ModelRunner:
         # Set enforce_eager to True for Neuron backend, to avoid capturing graph
         if self.device_config.is_neuron:
             self.model_config.enforce_eager = True
+    
+    def load_model_mock(self) -> torch.nn.Module:
+        model = get_model(self.model_config,
+                               self.device_config,
+                               lora_config=self.lora_config,
+                               parallel_config=self.parallel_config,
+                               scheduler_config=self.scheduler_config)
+        model = model.to("cpu")
+        return model
+
+    def load_model_from_memory(self, shm_name: str, size: int) -> None:
+        logger.info(f"Start shared mem!")
+        existing_shm = shared_memory.SharedMemory(name=shm_name)
+        byte_data = bytearray(existing_shm.buf[:size])
+        logger.info(f"Start pickle!")
+        pickle_start_time = time.time()
+        self.model = pickle.loads(byte_data)
+        logger.info(f"End pickle!")
+        pickle_end_time = time.time()
+        self.model = self.model.to(self.device)
+        model_end_time = time.time()
+        logger.info(f"pickle time: {pickle_end_time - pickle_start_time}")
+        logger.info(f"pcie time: {model_end_time - pickle_end_time}")
+        existing_shm.close()
+
 
     def load_model(self) -> None:
         self.model = get_model(self.model_config,

@@ -98,6 +98,12 @@ class Worker:
 
     def load_model(self):
         self.model_runner.load_model()
+    
+    def load_model_from_memory(self, shm_name: str, size: int):
+        self.model_runner.load_model_from_memory(shm_name, size)
+
+    def load_model_mock(self) -> torch.nn.Module:
+        return self.model_runner.load_model_mock()
 
     @torch.inference_mode()
     def profile_num_available_blocks(

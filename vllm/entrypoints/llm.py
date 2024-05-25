@@ -4,7 +4,7 @@ from tqdm import tqdm
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 
 from vllm.lora.request import LoRARequest
-from vllm.engine.arg_utils import EngineArgs
+from vllm.engine.arg_utils import EngineArgs, EngineSharedMem
 from vllm.engine.llm_engine import LLMEngine
 from vllm.outputs import RequestOutput
 from vllm.sampling_params import SamplingParams
@@ -85,6 +85,8 @@ class LLM:
         max_context_len_to_capture: int = 8192,
         disable_custom_all_reduce: bool = False,
         liquid: bool = False,
+        load_only: bool = False,
+        load_position: Optional[EngineSharedMem] = None,
         **kwargs,
     ) -> None:
         if "disable_log_stats" not in kwargs:
@@ -105,6 +107,8 @@ class LLM:
             enforce_eager=enforce_eager,
             max_context_len_to_capture=max_context_len_to_capture,
             disable_custom_all_reduce=disable_custom_all_reduce,
+            load_only=load_only,
+            load_position=load_position,
             liquid=liquid,
             **kwargs,
         )

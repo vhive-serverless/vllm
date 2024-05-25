@@ -8,6 +8,11 @@ from vllm.config import (CacheConfig, DeviceConfig, ModelConfig,
 
 
 @dataclass
+class EngineSharedMem:
+    shm_name: str
+    size: int
+
+@dataclass
 class EngineArgs:
     """Arguments for vLLM engine."""
     model: str
@@ -47,6 +52,8 @@ class EngineArgs:
     device: str = 'auto'
     local_rank : int = 0
     liquid: bool = False
+    load_only: bool = False
+    load_position: Optional[EngineSharedMem] = None
 
     def __post_init__(self):
         if self.tokenizer is None:

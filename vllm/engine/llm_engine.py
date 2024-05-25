@@ -12,7 +12,7 @@ from vllm.config import (CacheConfig, DeviceConfig, ModelConfig,
                          ParallelConfig, SchedulerConfig, LoRAConfig)
 from vllm.core.scheduler import Scheduler, SchedulerOutputs
 from vllm.core.place import PlaceRequest
-from vllm.engine.arg_utils import EngineArgs
+from vllm.engine.arg_utils import EngineArgs, EngineSharedMem
 from vllm.engine.metrics import StatLogger, Stats, EngineMetrics
 from vllm.engine.ray_utils import RayWorkerVllm, initialize_cluster, ray
 from vllm.logger import init_logger
@@ -85,6 +85,8 @@ class LLMEngine:
         lora_config: Optional[LoRAConfig],
         placement_group: Optional["PlacementGroup"],
         log_stats: bool,
+        load_only: bool = False,
+        load_position: Optional[EngineSharedMem] = None,
         metrics_record: bool = True,
         local_rank: int = 0,
     ) -> None:
@@ -118,6 +120,8 @@ class LLMEngine:
         self.log_stats = log_stats
         self.metrics_record = metrics_record
         self.local_rank = local_rank
+        self.load_only = load_only
+        self.load_position = load_position
         self._verify_args()
 
         self._init_tokenizer()
@@ -132,7 +136,8 @@ class LLMEngine:
             self._init_workers_ray(placement_group)
         else:
             self._init_workers()
-
+        if self.load_only:
+            return
         # Profile the memory usage and initialize the cache.
         self._init_cache()
 
@@ -211,9 +216,21 @@ class LLMEngine:
                 kv_cache_dtype=self.cache_config.cache_dtype,
                 is_driver_worker=True,
             )
-
+        self.loaded_model = None
         self._run_workers("init_model")
-        self._run_workers("load_model")
+        load_worker_start_time = time.time()
+        if self.load_only:
+            self.loaded_model = self._run_workers("load_model_mock")
+        elif self.load_position is None:
+            self._run_workers("load_model")
+        else:
+            self._run_workers("load_model_from_memory", self.load_position.shm_name, self.load_position.size)
+        load_worker_end_time = time.time()
+        logger.info(f"Loading using {load_worker_end_time - load_worker_start_time} seconds")
+
+    def get_loaded_model(self):
+        return self.loaded_model
+
 
     def _init_tokenizer(self, **tokenizer_init_kwargs):
         init_kwargs = dict(
@@ -426,7 +443,7 @@ class LLMEngine:
         engine = cls(*engine_configs,
                      placement_group,
                      log_stats=not engine_args.disable_log_stats,
-                     local_rank=engine_args.local_rank)
+                     local_rank=engine_args.local_rank, load_only=engine_args.load_only, load_position=engine_args.load_position)
         return engine
 
     def place(self,
@@ -828,7 +845,7 @@ class LLMEngine:
         # Log stats.
         if self.log_stats:
             self.stat_logger.log(self._get_stats(scheduler_outputs))
-        
+
         # metrics record
         if self.metrics_record:
             stats = self._get_stats(scheduler_outputs)
@@ -844,7 +861,7 @@ class LLMEngine:
             stats = self._get_stats(scheduler_outputs=None)
             return self._stats_to_metrics(stats)
         return self.metrics[-1]
-    
+
     def get_metrics_history(self) -> List[EngineMetrics]:
         """Get the metrics history."""
         return self.metrics
@@ -913,8 +930,8 @@ class LLMEngine:
             else:
                 # modify scheduler to add new blocks
                 self.scheduler.append_blocks(new_blocks_num)
-                
-            
+
+
 
         if not scheduler_outputs.is_empty():
             # Execute the model.
@@ -1008,7 +1025,7 @@ class LLMEngine:
             time_per_output_tokens=time_per_output_tokens,
             time_e2e_requests=time_e2e_requests,
         )
-    
+
     def _stats_to_metrics(self, stats: Stats, finished_tokens: int = 0) -> EngineMetrics:
         self.total_tokens += stats.num_prompt_tokens + stats.num_generation_tokens - finished_tokens
         return EngineMetrics(

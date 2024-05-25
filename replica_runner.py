@@ -10,14 +10,22 @@ from vllm.outputs import RequestOutput
 
 import torch
 
+from typing import Optional
+from vllm.engine.arg_utils import EngineSharedMem
 from vllm.logger import init_logger
+
 logger = init_logger(__name__)
 
+
 class ReplicaRunner(LLM):  # type: ignore
-    def __init__(self, model: str, device: int, gpu_memory_capacity:int, gpu_memory_space:int):
+    def __init__(self, model: str, device: int, gpu_memory_capacity: int, gpu_memory_space: int,
+                 load_only: bool = False, load_position: Optional[EngineSharedMem] = None):
         gpu_memory_utilization: float = gpu_memory_space / gpu_memory_capacity
-        logger.debug(f"Replica runner inited with gpu utilization: {gpu_memory_utilization:.2f}")
-        super().__init__(model, local_rank=device, enforce_eager=True, gpu_memory_utilization=gpu_memory_utilization, device=f'cuda:{device}')
+        logger.debug(
+            f"Replica runner inited with gpu utilization: {gpu_memory_utilization:.2f}")
+        super().__init__(model, local_rank=device, enforce_eager=True,
+                         gpu_memory_utilization=gpu_memory_utilization, device=f'cuda:{device}', load_only=load_only,
+                         load_position=load_position)
 
         self.request_map: Dict[str, int] = {}
         # self.running_status: bool = True
@@ -25,6 +33,9 @@ class ReplicaRunner(LLM):  # type: ignore
         self.running_thread.daemon = True
         # self.running_thread.start()
         self.finished_requests: List[int] = []
+
+    def get_model(self) -> torch.nn.Module:
+        return self.llm_engine.get_loaded_model()
 
     def start(self) -> None:
         self.running_status: bool = True
@@ -42,7 +53,8 @@ class ReplicaRunner(LLM):  # type: ignore
         if not self.running_status:
             logger.error("ReplicaRunner is stopped")
             return False
-        logger.info(f"Serve request: {prompts} with request_id: {global_request_id}")
+        logger.info(
+            f"Serve request: {prompts} with request_id: {global_request_id}")
         samplingMethod = SamplingParams(
             temperature=0.8, top_p=0.95, max_tokens=token_length)
         return self._add_request_with_check(prompts, samplingMethod, global_request_id)
