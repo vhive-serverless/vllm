@@ -183,6 +183,10 @@ class RayGPUExecutor(DistributedGPUExecutor):
                           active_worker=True,
                           )
 
+    def place(self) -> None:
+        self.active_workers.append(self.workers[0])
+        self._update_active_workers()
+
     def _update_active_workers(self) -> None:
 
         driver_ip = get_ip()

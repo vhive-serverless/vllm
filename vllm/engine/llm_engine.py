@@ -3,6 +3,8 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, ClassVar, Iterable, List, Optional
 from typing import Sequence as GenericSequence
 from typing import Type, TypeVar, Union
+from queue import Queue
+from vllm.core.place import PlaceRequest
 
 from transformers import GenerationConfig, PreTrainedTokenizer
 
@@ -207,6 +209,7 @@ class LLMEngine:
         self.load_config = load_config
         self.decoding_config = decoding_config or DecodingConfig()
         self.log_stats = log_stats
+        self.place_req_queue: Queue[PlaceRequest] = Queue()
 
         if not self.model_config.skip_tokenizer_init:
             self.tokenizer = self._init_tokenizer()
@@ -707,6 +710,9 @@ class LLMEngine:
             request_outputs.append(request_output)
         return request_outputs
 
+    def place(self) -> None:
+        self.model_executor.place()
+
     def step(self) -> List[Union[RequestOutput, EmbeddingRequestOutput]]:
         """Performs one decoding iteration and returns newly generated results.
 
@@ -758,6 +764,10 @@ class LLMEngine:
             >>>     if not (engine.has_unfinished_requests() or example_inputs):
             >>>         break
         """
+        if not self.place_req_queue.empty():
+            place_req = self.place_req_queue.get()
+            self.place()
+
         seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
 
         if not scheduler_outputs.is_empty():

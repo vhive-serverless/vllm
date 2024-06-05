@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from typing import ClassVar, List, Optional, Sequence, Union, cast, overload
+from queue import Queue
 
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
@@ -17,6 +18,7 @@ from vllm.sampling_params import SamplingParams
 from vllm.sequence import MultiModalData
 from vllm.usage.usage_lib import UsageContext
 from vllm.utils import Counter, deprecate_kwargs
+from vllm.core.place import PlaceRequest
 
 logger = init_logger(__name__)
 
@@ -520,6 +522,11 @@ class LLM:
                 params[i] if isinstance(params, Sequence) else params,
                 lora_request=lora_request,
             )
+
+    def add_place_request(self,
+        place_request: PlaceRequest) -> None:
+        self.llm_engine.place_req_queue.put(place_request)
+
 
     def _add_request(
         self,
