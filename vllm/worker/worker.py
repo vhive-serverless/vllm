@@ -45,6 +45,7 @@ class Worker(WorkerBase):
         vision_language_config: Optional[VisionLanguageConfig] = None,
         speculative_config: Optional[SpeculativeConfig] = None,
         is_driver_worker: bool = False,
+        is_active: bool = False,
     ) -> None:
         self.model_config = model_config
         self.parallel_config = parallel_config
@@ -57,6 +58,11 @@ class Worker(WorkerBase):
         self.lora_config = lora_config
         self.load_config = load_config
         self.is_driver_worker = is_driver_worker
+        if self.is_driver_worker:
+            self.is_active = True
+        else:
+            self.is_active = is_active
+
         if self.is_driver_worker:
             assert self.rank == 0, "The driver worker must have rank 0."
 
@@ -111,11 +117,26 @@ class Worker(WorkerBase):
             raise RuntimeError(
                 f"Not support device type: {self.device_config.device}")
         # Initialize the distributed environment.
-        init_worker_distributed_environment(self.parallel_config, self.rank,
-                                            self.distributed_init_method,
-                                            self.local_rank)
+        # init_worker_distributed_environment(self.parallel_config, self.rank,
+        #                                     self.distributed_init_method,
+        #                                     self.local_rank)
         # Set random seed.
         set_random_seed(self.model_config.seed)
+
+
+    def destroy_dist_group(self):
+        if torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()
+
+    def init_dist_group(
+            self,
+            rank: int,
+            world_size: int,
+            distributed_init_method: Optional[str] = None,
+            local_rank: int = -1,
+    ) -> None:
+        init_distributed_environment(world_size=world_size, rank=rank, distributed_init_method=distributed_init_method, local_rank=local_rank)
+        ensure_model_parallel_initialized(tensor_model_parallel_size=world_size, pipeline_model_parallel_size=1)
 
     def load_model(self):
         self.model_runner.load_model()
