@@ -12,6 +12,8 @@ from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
 from vllm.distributed import (broadcast_tensor_dict,
                               ensure_model_parallel_initialized,
                               init_distributed_environment,
+                              init_distributed_group_manager,
+                              update_distributed_group_manager,
                               set_custom_all_reduce)
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
@@ -20,6 +22,10 @@ from vllm.worker.cache_engine import CacheEngine
 from vllm.worker.embedding_model_runner import EmbeddingModelRunner
 from vllm.worker.model_runner import ModelRunner
 from vllm.worker.worker_base import WorkerBase
+from vllm.utils import get_distributed_init_method
+from vllm.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 class Worker(WorkerBase):
@@ -45,6 +51,7 @@ class Worker(WorkerBase):
         vision_language_config: Optional[VisionLanguageConfig] = None,
         speculative_config: Optional[SpeculativeConfig] = None,
         is_driver_worker: bool = False,
+        is_active: bool = False,
     ) -> None:
         self.model_config = model_config
         self.parallel_config = parallel_config
@@ -57,6 +64,11 @@ class Worker(WorkerBase):
         self.lora_config = lora_config
         self.load_config = load_config
         self.is_driver_worker = is_driver_worker
+        if self.is_driver_worker:
+            self.is_active = True
+        else:
+            self.is_active = is_active
+
         if self.is_driver_worker:
             assert self.rank == 0, "The driver worker must have rank 0."
 
@@ -110,14 +122,32 @@ class Worker(WorkerBase):
         else:
             raise RuntimeError(
                 f"Not support device type: {self.device_config.device}")
-        # Initialize the distributed environment.
-        init_worker_distributed_environment(self.parallel_config, self.rank,
-                                            self.distributed_init_method,
-                                            self.local_rank)
         # Set random seed.
         set_random_seed(self.model_config.seed)
 
+    def init_distributed_group_manager(
+            self,
+            rank: int,
+            world_size: int,
+            driver_ip: str,
+            port: int,
+            local_rank: int = -1,
+    ) -> None:
+        # Initialize the distributed environment.
+        init_worker_distributed_environment(self.parallel_config, rank, world_size,
+                                            driver_ip, port,
+                                            self.local_rank)
+
+    def update_distributed_group_manager(self, active_ranks: List[int]) -> None:
+        update_distributed_group_manager(active_ranks=active_ranks)
+
+
     def load_model(self):
+        self.model_runner.load_model()
+
+    def reload_model(self):
+        if hasattr(self.model_runner, "model"):
+            del self.model_runner.model
         self.model_runner.load_model()
 
     def save_sharded_state(
@@ -147,6 +177,12 @@ class Worker(WorkerBase):
         """
         # Profile the memory usage of the model and get the maximum number of
         # cache blocks that can be allocated with the remaining free memory.
+
+        if hasattr(self, 'cache_engine'):
+            self.cache_engine.free()
+            del self.cache_engine
+            self.cache_engine = None
+
         torch.cuda.empty_cache()
 
         # Execute a forward pass with dummy inputs to profile the memory usage
@@ -196,6 +232,7 @@ class Worker(WorkerBase):
 
     def _init_cache_engine(self):
         assert self.cache_config.num_gpu_blocks is not None
+
         self.cache_engine = CacheEngine(self.cache_config, self.model_config,
                                         self.parallel_config)
         self.gpu_cache = self.cache_engine.gpu_cache
@@ -333,21 +370,24 @@ class Worker(WorkerBase):
                                                 self.model_config,
                                                 self.parallel_config)
 
+    def get_rank(self) -> int:
+        return self.rank
+
 
 def init_worker_distributed_environment(
     parallel_config: ParallelConfig,
     rank: int,
-    distributed_init_method: Optional[str] = None,
+    world_size: int,
+    driver_ip: str,
+    port: int,
     local_rank: int = -1,
 ) -> None:
     """Initialize the distributed environment."""
     set_custom_all_reduce(not parallel_config.disable_custom_all_reduce)
 
-    init_distributed_environment(parallel_config.world_size, rank,
-                                 distributed_init_method, local_rank)
-
-    ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
-                                      parallel_config.pipeline_parallel_size)
+    init_distributed_group_manager(rank=rank, 
+                                   world_size=world_size, 
+                                   driver_ip = driver_ip, port=port) 
 
 
 def _check_if_gpu_supports_dtype(torch_dtype: torch.dtype):

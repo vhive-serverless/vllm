@@ -15,12 +15,13 @@ try:
         """Ray wrapper for vllm.worker.Worker, allowing Worker to be
         lazliy initialized after Ray sets CUDA_VISIBLE_DEVICES."""
 
-        def __init__(self, *args, **kwargs) -> None:
+        def __init__(self, rank: int, *args, **kwargs) -> None:
             super().__init__(*args, **kwargs)
             # Since the compiled DAG runs a main execution
             # in a different thread that calls cuda.set_device.
             # The flag indicates is set_device is called on
             # that thread.
+            self.rank = rank
             self.compiled_dag_cuda_device_set = False
 
         def get_node_ip(self) -> str:

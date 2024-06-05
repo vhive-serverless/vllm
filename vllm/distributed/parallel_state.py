@@ -7,9 +7,12 @@ from typing import List, Optional
 
 import torch
 from torch.distributed import ProcessGroup
+import torch.distributed
 
 import vllm.envs as envs
 from vllm.logger import init_logger
+from vllm.utils import get_distributed_init_method
+
 
 logger = init_logger(__name__)
 
@@ -52,6 +55,9 @@ _PP_GLOBAL_RANKS: Optional[List[int]] = None
 _LOCAL_RANK = -1
 
 
+DISTRIBUTED_GROUP_MANAGER = None
+
+
 def set_custom_all_reduce(enable: bool):
     global _ENABLE_CUSTOM_ALL_REDUCE
     _ENABLE_CUSTOM_ALL_REDUCE = enable
@@ -63,18 +69,28 @@ def get_pp_pynccl_communicator():
 
 
 def get_tp_pynccl_communicator():
-    global _TP_PYNCCL_COMMUNICATOR
-    return _TP_PYNCCL_COMMUNICATOR
+    # global _TP_PYNCCL_COMMUNICATOR
+    # return _TP_PYNCCL_COMMUNICATOR
+
+    global DISTRIBUTED_GROUP_MANAGER
+    return DISTRIBUTED_GROUP_MANAGER._TP_PYNCCL_COMMUNICATOR
 
 
 def get_tp_ca_communicator():
-    global _TP_CA_COMMUNICATOR
-    return _TP_CA_COMMUNICATOR
+    # global _TP_CA_COMMUNICATOR
+    # return _TP_CA_COMMUNICATOR
+
+    global DISTRIBUTED_GROUP_MANAGER
+    return DISTRIBUTED_GROUP_MANAGER._TP_CA_COMMUNICATOR
 
 
 def get_local_rank():
-    global _LOCAL_RANK
-    return _LOCAL_RANK
+    # global _LOCAL_RANK
+    # return _LOCAL_RANK
+
+
+    global DISTRIBUTED_GROUP_MANAGER
+    return DISTRIBUTED_GROUP_MANAGER.rank
 
 
 def init_distributed_environment(
@@ -254,27 +270,42 @@ def ensure_model_parallel_initialized(
 
 def model_parallel_is_initialized():
     """Check if tensor and pipeline parallel groups are initialized."""
-    return (_TP_DEVICE_GROUP is not None and _PP_DEVICE_GROUP is not None)
+    # return (_TP_DEVICE_GROUP is not None and _PP_DEVICE_GROUP is not None)
+    global DISTRIBUTED_GROUP_MANAGER
+    if DISTRIBUTED_GROUP_MANAGER is None:
+        return False
+    return (DISTRIBUTED_GROUP_MANAGER._TP_DEVICE_GROUP is not None) 
+
 
 
 def get_cpu_world_group():
     """Get the CPU world group."""
-    assert _CPU_WORLD_GROUP is not None, ("CPU world group is not initialized")
-    return _CPU_WORLD_GROUP
+    # assert _CPU_WORLD_GROUP is not None, ("CPU world group is not initialized")
+    # return _CPU_WORLD_GROUP
+
+    assert DISTRIBUTED_GROUP_MANAGER is not None, ("DISTRIBUTED_GROUP_MANAGER is not initialized")
+    return DISTRIBUTED_GROUP_MANAGER._CPU_WORLD_GROUP
 
 
 def get_tensor_model_parallel_group():
     """Get the tensor model parallel group the caller rank belongs to."""
-    assert _TP_DEVICE_GROUP is not None, (
-        "tensor model parallel group is not initialized")
-    return _TP_DEVICE_GROUP
+    # assert _TP_DEVICE_GROUP is not None, (
+    #     "tensor model parallel group is not initialized")
+    # return _TP_DEVICE_GROUP
+    assert DISTRIBUTED_GROUP_MANAGER is not None, ("DISTRIBUTED_GROUP_MANAGER is not initialized")
+    assert DISTRIBUTED_GROUP_MANAGER._TP_DEVICE_GROUP is not None, ("Tensor parallel group is not initialized")
+    return DISTRIBUTED_GROUP_MANAGER._TP_DEVICE_GROUP
+
 
 
 def get_tensor_model_parallel_cpu_group():
     """Get the tensor model parallel cpu group the caller rank belongs to."""
-    assert _TP_CPU_GROUP is not None, (
-        "tensor model parallel cpu group is not initialized")
-    return _TP_CPU_GROUP
+    # assert _TP_CPU_GROUP is not None, (
+    #     "tensor model parallel cpu group is not initialized")
+    # return _TP_CPU_GROUP
+
+    assert DISTRIBUTED_GROUP_MANAGER is not None, ("DISTRIBUTED_GROUP_MANAGER is not initialized")
+    return DISTRIBUTED_GROUP_MANAGER._TP_CPU_GROUP
 
 
 def get_pipeline_model_parallel_group():
@@ -376,3 +407,148 @@ def destroy_model_parallel():
     _PP_DEVICE_GROUP = None
     global _PP_GLOBAL_RANKS
     _PP_GLOBAL_RANKS = None
+
+
+
+
+def init_distributed_group_manager(rank: int, world_size: int, driver_ip: str, port: int) -> None:
+    global DISTRIBUTED_GROUP_MANAGER
+    DISTRIBUTED_GROUP_MANAGER = DistributedGroupManager(
+        rank=rank,
+        world_size=world_size,
+        driver_ip=driver_ip,
+        port=port
+    )
+    DISTRIBUTED_GROUP_MANAGER.create_groups()
+
+def update_distributed_group_manager(active_ranks: List[int]) -> None:
+    global DISTRIBUTED_GROUP_MANAGER
+    DISTRIBUTED_GROUP_MANAGER.destroy_groups()
+    DISTRIBUTED_GROUP_MANAGER.active_ranks = active_ranks
+    # Change port number
+    DISTRIBUTED_GROUP_MANAGER.port += 1
+    DISTRIBUTED_GROUP_MANAGER.create_groups()
+    
+class DistributedGroupManager:
+    def __init__(self, rank: int, world_size: int, driver_ip: str ,port: int,num_nodes: int=1) -> None:
+        """
+        This class only manages workers on the same node
+        world_size: total number of gpus across all device(s)
+        num_nodes: how many nodes are there
+        """
+        assert num_nodes == 1
+
+        self.rank = rank
+        self.world_size = world_size
+        self.num_nodes = num_nodes
+        self.ranks = list(range(self.world_size))
+        self.active_ranks = self.ranks
+
+        # world groups, these groups contain worker across different nodes
+        self._DEVICE_WORLD_GROUP = None
+        self._CPU_WORLD_GROUP = None
+
+        self._TP_DEVICE_GROUP = None
+        self._TP_CPU_GROUP = None
+
+        self._TP_DEVICE_COMMUNICATOR = None
+        self._TP_CA_COMMUNICATOR = None
+
+        self.driver_ip = driver_ip
+        self.port = port
+
+    def destroy_groups(self) -> None:
+        if self.rank not in self.active_ranks:
+            return
+
+        if self._TP_PYNCCL_COMMUNICATOR is not None:
+            self._TP_PYNCCL_COMMUNICATOR = None 
+
+        if self._TP_CA_COMMUNICATOR is not None:
+            self._TP_CA_COMMUNICATOR = None
+        
+        if self._TP_DEVICE_GROUP is not None:
+            torch.distributed.destroy_process_group(self._TP_DEVICE_GROUP) 
+            self._TP_DEVICE_GROUP = None
+
+        if self._TP_CPU_GROUP is not None:
+            torch.distributed.destroy_process_group(self._TP_CPU_GROUP)
+            self._TP_CPU_GROUP = None
+
+        if self._CPU_WORLD_GROUP is not None:
+            torch.distributed.destroy_process_group(self._CPU_WORLD_GROUP) 
+            self._CPU_WORLD_GROUP = None
+
+        if self._DEVICE_WORLD_GROUP is not None:
+            torch.distributed.destroy_process_group(self._DEVICE_WORLD_GROUP) 
+            self._DEVICE_WORLD_GROUP = None
+
+
+    def create_groups(self) -> None:
+        """
+        re-initialize groups that is still active
+        """
+
+        from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
+
+        from vllm.distributed.device_communicators.custom_all_reduce import (
+                    CustomAllreduce)
+        if self.rank not in self.active_ranks:
+            return
+
+        assert self._DEVICE_WORLD_GROUP == self._CPU_WORLD_GROUP == self._TP_DEVICE_GROUP == self._TP_CPU_GROUP == None
+        world_size = len(self.active_ranks) 
+
+        distributed_init_method = get_distributed_init_method(self.driver_ip, self.port)
+
+        backend = 'nccl' 
+        logger.debug(
+            "world_size=%d rank=%d"
+            "distributed_init_method=%s backend=%s", world_size, self.rank,
+            distributed_init_method, backend)
+
+
+        if not torch.distributed.is_initialized():
+            assert distributed_init_method is not None, (
+                "distributed_init_method must be provided when initializing "
+                "distributed environment")
+            # this backend is used for WORLD
+            torch.distributed.init_process_group(
+                backend=backend,
+                init_method=distributed_init_method,
+                world_size=world_size,
+                rank=self.rank)
+
+            self._DEVICE_WORLD_GROUP = torch.distributed.group.WORLD
+            self._CPU_WORLD_GROUP = torch.distributed.new_group(ranks=self.active_ranks,
+                                                       backend="gloo")
+            
+
+
+        
+        
+        group = torch.distributed.new_group(self.active_ranks, backend=backend)
+        cpu_group = torch.distributed.new_group(self.active_ranks, backend="gloo")
+
+        self._TP_DEVICE_GROUP = group
+        self._TP_CPU_GROUP = cpu_group
+
+
+        self._TP_PYNCCL_COMMUNICATOR = PyNcclCommunicator(
+                group=self._TP_CPU_GROUP,
+                device=self.rank,
+            )
+
+        self._TP_CA_COMMUNICATOR = CustomAllreduce(
+            group=self._TP_CPU_GROUP,
+            device=self.rank,
+        )
+
+        
+
+        
+
+        
+
+    
+

@@ -3,6 +3,8 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, ClassVar, Iterable, List, Optional
 from typing import Sequence as GenericSequence
 from typing import Type, TypeVar, Union
+from queue import Queue
+from vllm.core.place import PlaceRequest
 
 from transformers import GenerationConfig, PreTrainedTokenizer
 
@@ -158,6 +160,8 @@ class LLMEngine:
         log_stats: bool,
         usage_context: UsageContext = UsageContext.ENGINE_CONTEXT,
     ) -> None:
+        import time
+        start = time.time()
         logger.info(
             "Initializing an LLM engine (v%s) with config: "
             "model=%r, speculative_config=%r, tokenizer=%r, "
@@ -207,6 +211,7 @@ class LLMEngine:
         self.load_config = load_config
         self.decoding_config = decoding_config or DecodingConfig()
         self.log_stats = log_stats
+        self.place_req_queue: Queue[PlaceRequest] = Queue()
 
         if not self.model_config.skip_tokenizer_init:
             self.tokenizer = self._init_tokenizer()
@@ -231,8 +236,11 @@ class LLMEngine:
             load_config=load_config,
         )
 
-        if not self.model_config.embedding_mode:
-            self._initialize_kv_caches()
+        cache_start = time.time()
+        # if not self.model_config.embedding_mode:
+        #     self._initialize_kv_caches()
+        cache_init_latency = time.time() - cache_start
+        logger.info(f"cache init latency: {cache_init_latency:.1f}s")
 
         # If usage stat is enabled, collect relevant info.
         if is_usage_stats_enabled():
@@ -302,6 +310,7 @@ class LLMEngine:
                 ),
             ))
 
+
     def _initialize_kv_caches(self) -> None:
         """Initialize the KV cache in the worker(s).
 
@@ -332,10 +341,12 @@ class LLMEngine:
     ) -> "LLMEngine":
         """Creates an LLM engine from the engine arguments."""
         # Create the engine configs.
+        import time
         engine_config = engine_args.create_engine_config()
         distributed_executor_backend = (
             engine_config.parallel_config.distributed_executor_backend)
 
+        start = time.time()
         # Initialize the cluster and specify the executor class.
         if engine_config.device_config.device_type == "neuron":
             from vllm.executor.neuron_executor import NeuronExecutor
@@ -354,6 +365,8 @@ class LLMEngine:
         else:
             from vllm.executor.gpu_executor import GPUExecutor
             executor_class = GPUExecutor
+        latency = time.time() - start
+        logger.info(f"init ray cluster latency: {latency:.1f}s")
 
         # Create the LLM engine.
         engine = cls(
@@ -707,6 +720,9 @@ class LLMEngine:
             request_outputs.append(request_output)
         return request_outputs
 
+    def place(self) -> None:
+        self.model_executor.place()
+
     def step(self) -> List[Union[RequestOutput, EmbeddingRequestOutput]]:
         """Performs one decoding iteration and returns newly generated results.
 
@@ -758,6 +774,10 @@ class LLMEngine:
             >>>     if not (engine.has_unfinished_requests() or example_inputs):
             >>>         break
         """
+        if not self.place_req_queue.empty():
+            place_req = self.place_req_queue.get()
+            self.place()
+
         seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
 
         if not scheduler_outputs.is_empty():
