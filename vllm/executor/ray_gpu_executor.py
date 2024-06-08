@@ -164,8 +164,9 @@ class RayGPUExecutor(DistributedGPUExecutor):
         self._run_workers("update_environment_variables",
                           all_args=all_args_to_update_environment_variables, active_worker=False)
 
+        port = get_open_port()
         distributed_init_method = get_distributed_init_method(
-            driver_ip, get_open_port())
+            driver_ip, port)
 
         # Initialize the actual workers inside worker wrapper.
         init_worker_all_kwargs = [
@@ -186,7 +187,8 @@ class RayGPUExecutor(DistributedGPUExecutor):
                 {
                     "rank":rank,
                     "world_size": world_size,
-                    "distributed_init_method": distributed_init_method,
+                    "driver_ip": driver_ip,
+                    "port": port,
                     "local_rank": node_workers[node_id].index(rank)
                 }
             )
@@ -203,6 +205,7 @@ class RayGPUExecutor(DistributedGPUExecutor):
 
     def place(self) -> None:
         self.active_workers.append(self.workers[0])
+        self.should_restart_parallel_tasks = True
         self._update_active_workers()
 
 

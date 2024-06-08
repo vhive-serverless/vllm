@@ -22,6 +22,7 @@ from vllm.worker.cache_engine import CacheEngine
 from vllm.worker.embedding_model_runner import EmbeddingModelRunner
 from vllm.worker.model_runner import ModelRunner
 from vllm.worker.worker_base import WorkerBase
+from vllm.utils import get_distributed_init_method
 
 
 class Worker(WorkerBase):
@@ -125,12 +126,13 @@ class Worker(WorkerBase):
             self,
             rank: int,
             world_size: int,
-            distributed_init_method: Optional[str] = None,
+            driver_ip: str,
+            port: int,
             local_rank: int = -1,
     ) -> None:
         # Initialize the distributed environment.
         init_worker_distributed_environment(self.parallel_config, rank, world_size,
-                                            self.distributed_init_method,
+                                            driver_ip, port,
                                             self.local_rank)
 
     def update_distributed_group_manager(self, active_ranks: List[int]) -> None:
@@ -361,7 +363,8 @@ def init_worker_distributed_environment(
     parallel_config: ParallelConfig,
     rank: int,
     world_size: int,
-    distributed_init_method: Optional[str] = None,
+    driver_ip: str,
+    port: int,
     local_rank: int = -1,
 ) -> None:
     """Initialize the distributed environment."""
@@ -369,7 +372,7 @@ def init_worker_distributed_environment(
 
     init_distributed_group_manager(rank=rank, 
                                    world_size=world_size, 
-                                   distributed_init_method=distributed_init_method) 
+                                   driver_ip = driver_ip, port=port) 
 
 
 def _check_if_gpu_supports_dtype(torch_dtype: torch.dtype):

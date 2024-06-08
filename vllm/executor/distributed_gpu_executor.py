@@ -21,6 +21,8 @@ class DistributedGPUExecutor(GPUExecutor):
         # Updated by implementations that require additional args to be passed
         # to the _run_workers execute_model call
         self.extra_execute_model_run_workers_kwargs: Dict[str, Any] = {}
+        
+        self.should_restart_parallel_tasks: bool = True
 
         super().__init__(*args, **kwargs)
 
@@ -66,7 +68,7 @@ class DistributedGPUExecutor(GPUExecutor):
     def execute_model(
             self,
             execute_model_req: ExecuteModelRequest) -> List[SamplerOutput]:
-        if self.parallel_worker_tasks is None:
+        if self.should_restart_parallel_tasks:
             self.parallel_worker_tasks = self._run_workers(
                 "start_worker_execution_loop",
                 async_run_remote_workers_only=True,

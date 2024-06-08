@@ -11,6 +11,8 @@ import torch.distributed
 
 import vllm.envs as envs
 from vllm.logger import init_logger
+from vllm.utils import get_distributed_init_method
+
 
 logger = init_logger(__name__)
 
@@ -409,12 +411,13 @@ def destroy_model_parallel():
 
 
 
-def init_distributed_group_manager(rank: int, world_size: int, distributed_init_method: str) -> None:
+def init_distributed_group_manager(rank: int, world_size: int, driver_ip: str, port: int) -> None:
     global DISTRIBUTED_GROUP_MANAGER
     DISTRIBUTED_GROUP_MANAGER = DistributedGroupManager(
         rank=rank,
         world_size=world_size,
-        distributed_init_method=distributed_init_method
+        driver_ip=driver_ip,
+        port=port
     )
     DISTRIBUTED_GROUP_MANAGER.create_groups()
 
@@ -422,10 +425,12 @@ def update_distributed_group_manager(active_ranks: List[int]) -> None:
     global DISTRIBUTED_GROUP_MANAGER
     DISTRIBUTED_GROUP_MANAGER.destroy_groups()
     DISTRIBUTED_GROUP_MANAGER.active_ranks = active_ranks
+    # Change port number
+    DISTRIBUTED_GROUP_MANAGER.port += 1
     DISTRIBUTED_GROUP_MANAGER.create_groups()
     
 class DistributedGroupManager:
-    def __init__(self, rank: int, world_size: int, distributed_init_method: str ,num_nodes: int=1) -> None:
+    def __init__(self, rank: int, world_size: int, driver_ip: str ,port: int,num_nodes: int=1) -> None:
         """
         This class only manages workers on the same node
         world_size: total number of gpus across all device(s)
@@ -449,13 +454,18 @@ class DistributedGroupManager:
         self._TP_DEVICE_COMMUNICATOR = None
         self._TP_CA_COMMUNICATOR = None
 
-        self.distributed_init_method = distributed_init_method
+        self.driver_ip = driver_ip
+        self.port = port
 
     def destroy_groups(self) -> None:
         if self.rank not in self.active_ranks:
             return
 
-        
+        if self._TP_PYNCCL_COMMUNICATOR is not None:
+            self._TP_PYNCCL_COMMUNICATOR = None 
+
+        if self._TP_CA_COMMUNICATOR is not None:
+            self._TP_CA_COMMUNICATOR = None
         
         if self._TP_DEVICE_GROUP is not None:
             torch.distributed.destroy_process_group(self._TP_DEVICE_GROUP) 
@@ -478,34 +488,42 @@ class DistributedGroupManager:
         """
         re-initialize groups that is still active
         """
+
+        from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
+
+        from vllm.distributed.device_communicators.custom_all_reduce import (
+                    CustomAllreduce)
         if self.rank not in self.active_ranks:
             return
 
         assert self._DEVICE_WORLD_GROUP == self._CPU_WORLD_GROUP == self._TP_DEVICE_GROUP == self._TP_CPU_GROUP == None
         world_size = len(self.active_ranks) 
 
+        distributed_init_method = get_distributed_init_method(self.driver_ip, self.port)
+
         backend = 'nccl' 
         logger.debug(
             "world_size=%d rank=%d"
             "distributed_init_method=%s backend=%s", world_size, self.rank,
-            self.distributed_init_method, backend)
+            distributed_init_method, backend)
 
 
         if not torch.distributed.is_initialized():
-            assert self.distributed_init_method is not None, (
+            assert distributed_init_method is not None, (
                 "distributed_init_method must be provided when initializing "
                 "distributed environment")
             # this backend is used for WORLD
             torch.distributed.init_process_group(
                 backend=backend,
-                init_method=self.distributed_init_method,
+                init_method=distributed_init_method,
                 world_size=world_size,
                 rank=self.rank)
 
             self._DEVICE_WORLD_GROUP = torch.distributed.group.WORLD
-
             self._CPU_WORLD_GROUP = torch.distributed.new_group(ranks=self.active_ranks,
                                                        backend="gloo")
+            
+
 
         
         
@@ -516,15 +534,11 @@ class DistributedGroupManager:
         self._TP_CPU_GROUP = cpu_group
 
 
-        from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
         self._TP_PYNCCL_COMMUNICATOR = PyNcclCommunicator(
                 group=self._TP_CPU_GROUP,
                 device=self.rank,
             )
 
-        
-        from vllm.distributed.device_communicators.custom_all_reduce import (
-            CustomAllreduce)
         self._TP_CA_COMMUNICATOR = CustomAllreduce(
             group=self._TP_CPU_GROUP,
             device=self.rank,
