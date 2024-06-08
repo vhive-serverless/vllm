@@ -85,6 +85,7 @@ class RayGPUExecutor(DistributedGPUExecutor):
 
         # Create the workers.
         driver_ip = get_ip()
+        rank = 0
         for bundle_id, bundle in enumerate(placement_group.bundle_specs):
             if not bundle.get("GPU", 0):
                 continue
@@ -110,6 +111,7 @@ class RayGPUExecutor(DistributedGPUExecutor):
                 worker_module_name=worker_module_name,
                 worker_class_name=worker_class_name,
                 trust_remote_code=self.model_config.trust_remote_code,
+                rank=rank,
             )
 
             worker_ip = ray.get(worker.get_node_ip.remote())
@@ -121,10 +123,13 @@ class RayGPUExecutor(DistributedGPUExecutor):
                     worker_module_name=worker_module_name,
                     worker_class_name=worker_class_name,
                     trust_remote_code=self.model_config.trust_remote_code,
+                    rank=0,
                 )
             else:
                 # Else, added to the list of workers.
                 self.workers.append(worker)
+            rank += 1
+
 
         if self.driver_dummy_worker is None:
             raise ValueError(
@@ -174,8 +179,21 @@ class RayGPUExecutor(DistributedGPUExecutor):
 
         self._run_workers("init_device", active_worker=False)
 
+        all_args_to_init_distributed_group = []
+        world_size = 1 + len(self.workers)
+        for rank in range(world_size):
+            all_args_to_init_distributed_group.append(
+                {
+                    "rank":rank,
+                    "world_size": world_size,
+                    "distributed_init_method": distributed_init_method,
+                    "local_rank": node_workers[node_id].index(rank)
+                }
+            )
+        self._run_workers("init_distributed_group_manager", all_kwargs=all_args_to_init_distributed_group, active_worker=False)
+        
         self.active_workers = []
-        self._update_active_workers() 
+        self._update_active_workers()
 
         self._run_workers("load_model",
                           max_concurrent_workers=self.parallel_config.
@@ -185,36 +203,25 @@ class RayGPUExecutor(DistributedGPUExecutor):
 
     def place(self) -> None:
         self.active_workers.append(self.workers[0])
-        # self._update_active_workers()
+        self._update_active_workers()
+
 
     def _update_active_workers(self) -> None:
+        active_ranks = [0]
+        for w in self.active_workers:
+            rank = ray.get(w.execute_method.remote("get_rank"))
+            active_ranks.append(rank)
 
-        driver_ip = get_ip()
 
-        distributed_init_method = get_distributed_init_method(
-            driver_ip, get_open_port())
-        world_size = 1 + len(self.active_workers)
-        all_args_to_init_dist_group = []
-        # Append initialization for driver worker
-        all_args_to_init_dist_group.append(
-            {
-                "rank":0,
-                "world_size":world_size,
-                "distributed_init_method":distributed_init_method,
-                "local_rank":0,
-            }
-        )
-
-        for i, worker in enumerate(self.active_workers):
-            all_args_to_init_dist_group.append(
+        all_args_to_update_distributed_group = []
+        for _ in range(1+len(self.workers)):
+            all_args_to_update_distributed_group.append(
                 {
-                    "rank":i+1,
-                    "world_size": world_size,
-                    "distributed_init_method": distributed_init_method,
-                    "local_rank": i+1,
+                    "active_ranks": active_ranks,
                 }
             )
-        self._run_workers("init_dist_group", all_kwargs=all_args_to_init_dist_group)
+
+        self._run_workers("update_distributed_group_manager", all_kwargs=all_args_to_update_distributed_group, active_worker=False)
 
         self.parallel_config.tensor_parallel_size = 1 + len(self.active_workers)
 

@@ -13,6 +13,7 @@ from vllm.distributed import (broadcast_tensor_dict,
                               ensure_model_parallel_initialized,
                               init_distributed_environment,
                               init_distributed_group_manager,
+                              update_distributed_group_manager,
                               set_custom_all_reduce)
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
@@ -120,7 +121,7 @@ class Worker(WorkerBase):
         # Set random seed.
         set_random_seed(self.model_config.seed)
 
-    def init_dist_group(
+    def init_distributed_group_manager(
             self,
             rank: int,
             world_size: int,
@@ -131,6 +132,10 @@ class Worker(WorkerBase):
         init_worker_distributed_environment(self.parallel_config, rank, world_size,
                                             self.distributed_init_method,
                                             self.local_rank)
+
+    def update_distributed_group_manager(self, active_ranks: List[int]) -> None:
+        update_distributed_group_manager(active_ranks=active_ranks)
+
 
     def load_model(self):
         self.model_runner.load_model()
@@ -347,6 +352,9 @@ class Worker(WorkerBase):
         return CacheEngine.get_cache_block_size(self.cache_config,
                                                 self.model_config,
                                                 self.parallel_config)
+
+    def get_rank(self) -> int:
+        return self.rank
 
 
 def init_worker_distributed_environment(

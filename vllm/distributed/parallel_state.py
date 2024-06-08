@@ -7,6 +7,7 @@ from typing import List, Optional
 
 import torch
 from torch.distributed import ProcessGroup
+import torch.distributed
 
 import vllm.envs as envs
 from vllm.logger import init_logger
@@ -415,8 +416,14 @@ def init_distributed_group_manager(rank: int, world_size: int, distributed_init_
         world_size=world_size,
         distributed_init_method=distributed_init_method
     )
-    DISTRIBUTED_GROUP_MANAGER.update_active_group()
+    DISTRIBUTED_GROUP_MANAGER.create_groups()
 
+def update_distributed_group_manager(active_ranks: List[int]) -> None:
+    global DISTRIBUTED_GROUP_MANAGER
+    DISTRIBUTED_GROUP_MANAGER.destroy_groups()
+    DISTRIBUTED_GROUP_MANAGER.active_ranks = active_ranks
+    DISTRIBUTED_GROUP_MANAGER.create_groups()
+    
 class DistributedGroupManager:
     def __init__(self, rank: int, world_size: int, distributed_init_method: str ,num_nodes: int=1) -> None:
         """
@@ -444,24 +451,37 @@ class DistributedGroupManager:
 
         self.distributed_init_method = distributed_init_method
 
+    def destroy_groups(self) -> None:
+        if self.rank not in self.active_ranks:
+            return
 
-
-    def update_active_group(self) -> None:
-        """
-        destory all groups and re-initialize groups that is still active
-        """
-        if self._DEVICE_WORLD_GROUP is not None:
-            torch.distributed.destroy_process_group(self._DEVICE_WORLD_GROUP) 
         
-        if self._CPU_WORLD_GROUP is not None:
-            torch.distributed.destroy_process_group(self._CPU_WORLD_GROUP) 
         
         if self._TP_DEVICE_GROUP is not None:
             torch.distributed.destroy_process_group(self._TP_DEVICE_GROUP) 
+            self._TP_DEVICE_GROUP = None
 
         if self._TP_CPU_GROUP is not None:
             torch.distributed.destroy_process_group(self._TP_CPU_GROUP)
+            self._TP_CPU_GROUP = None
 
+        if self._CPU_WORLD_GROUP is not None:
+            torch.distributed.destroy_process_group(self._CPU_WORLD_GROUP) 
+            self._CPU_WORLD_GROUP = None
+
+        if self._DEVICE_WORLD_GROUP is not None:
+            torch.distributed.destroy_process_group(self._DEVICE_WORLD_GROUP) 
+            self._DEVICE_WORLD_GROUP = None
+
+
+    def create_groups(self) -> None:
+        """
+        re-initialize groups that is still active
+        """
+        if self.rank not in self.active_ranks:
+            return
+
+        assert self._DEVICE_WORLD_GROUP == self._CPU_WORLD_GROUP == self._TP_DEVICE_GROUP == self._TP_CPU_GROUP == None
         world_size = len(self.active_ranks) 
 
         backend = 'nccl' 
@@ -469,6 +489,8 @@ class DistributedGroupManager:
             "world_size=%d rank=%d"
             "distributed_init_method=%s backend=%s", world_size, self.rank,
             self.distributed_init_method, backend)
+
+
         if not torch.distributed.is_initialized():
             assert self.distributed_init_method is not None, (
                 "distributed_init_method must be provided when initializing "
@@ -485,7 +507,7 @@ class DistributedGroupManager:
             self._CPU_WORLD_GROUP = torch.distributed.new_group(ranks=self.active_ranks,
                                                        backend="gloo")
 
-
+        
         
         group = torch.distributed.new_group(self.active_ranks, backend=backend)
         cpu_group = torch.distributed.new_group(self.active_ranks, backend="gloo")
