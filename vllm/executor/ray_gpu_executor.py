@@ -185,7 +185,7 @@ class RayGPUExecutor(DistributedGPUExecutor):
 
     def place(self) -> None:
         self.active_workers.append(self.workers[0])
-        self._update_active_workers()
+        # self._update_active_workers()
 
     def _update_active_workers(self) -> None:
 
@@ -193,7 +193,6 @@ class RayGPUExecutor(DistributedGPUExecutor):
 
         distributed_init_method = get_distributed_init_method(
             driver_ip, get_open_port())
-        self._run_driver_workers("destroy_dist_group")
         world_size = 1 + len(self.active_workers)
         all_args_to_init_dist_group = []
         # Append initialization for driver worker

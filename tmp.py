@@ -14,11 +14,11 @@ for output in outputs:
     print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
 
 
-llm.add_place_request(PlaceRequest())
-outputs = llm.generate(prompts, sampling_params)
+# llm.add_place_request(PlaceRequest())
+# outputs = llm.generate(prompts, sampling_params)
 
-# Print the outputs.
-for output in outputs:
-    prompt = output.prompt
-    generated_text = output.outputs[0].text
-    print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
+# # Print the outputs.
+# for output in outputs:
+#     prompt = output.prompt
+#     generated_text = output.outputs[0].text
+#     print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")

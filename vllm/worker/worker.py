@@ -12,6 +12,7 @@ from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
 from vllm.distributed import (broadcast_tensor_dict,
                               ensure_model_parallel_initialized,
                               init_distributed_environment,
+                              init_distributed_group_manager,
                               set_custom_all_reduce)
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
@@ -116,17 +117,8 @@ class Worker(WorkerBase):
         else:
             raise RuntimeError(
                 f"Not support device type: {self.device_config.device}")
-        # Initialize the distributed environment.
-        # init_worker_distributed_environment(self.parallel_config, self.rank,
-        #                                     self.distributed_init_method,
-        #                                     self.local_rank)
         # Set random seed.
         set_random_seed(self.model_config.seed)
-
-
-    def destroy_dist_group(self):
-        if torch.distributed.is_initialized():
-            torch.distributed.destroy_process_group()
 
     def init_dist_group(
             self,
@@ -135,8 +127,10 @@ class Worker(WorkerBase):
             distributed_init_method: Optional[str] = None,
             local_rank: int = -1,
     ) -> None:
-        init_distributed_environment(world_size=world_size, rank=rank, distributed_init_method=distributed_init_method, local_rank=local_rank)
-        ensure_model_parallel_initialized(tensor_model_parallel_size=world_size, pipeline_model_parallel_size=1)
+        # Initialize the distributed environment.
+        init_worker_distributed_environment(self.parallel_config, rank, world_size,
+                                            self.distributed_init_method,
+                                            self.local_rank)
 
     def load_model(self):
         self.model_runner.load_model()
@@ -358,17 +352,16 @@ class Worker(WorkerBase):
 def init_worker_distributed_environment(
     parallel_config: ParallelConfig,
     rank: int,
+    world_size: int,
     distributed_init_method: Optional[str] = None,
     local_rank: int = -1,
 ) -> None:
     """Initialize the distributed environment."""
     set_custom_all_reduce(not parallel_config.disable_custom_all_reduce)
 
-    init_distributed_environment(parallel_config.world_size, rank,
-                                 distributed_init_method, local_rank)
-
-    ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
-                                      parallel_config.pipeline_parallel_size)
+    init_distributed_group_manager(rank=rank, 
+                                   world_size=world_size, 
+                                   distributed_init_method=distributed_init_method) 
 
 
 def _check_if_gpu_supports_dtype(torch_dtype: torch.dtype):
