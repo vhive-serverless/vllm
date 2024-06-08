@@ -142,6 +142,11 @@ class Worker(WorkerBase):
     def load_model(self):
         self.model_runner.load_model()
 
+    def reload_model(self):
+        if hasattr(self.model_runner, "model"):
+            del self.model_runner.model
+        self.model_runner.load_model()
+
     def save_sharded_state(
         self,
         path: str,

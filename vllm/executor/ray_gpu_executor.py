@@ -197,11 +197,11 @@ class RayGPUExecutor(DistributedGPUExecutor):
         self.active_workers = []
         self._update_active_workers()
 
-        self._run_workers("load_model",
-                          max_concurrent_workers=self.parallel_config.
-                          max_parallel_loading_workers,
-                          active_worker=True,
-                          )
+        # self._run_workers("load_model",
+        #                   max_concurrent_workers=self.parallel_config.
+        #                   max_parallel_loading_workers,
+        #                   active_worker=True,
+        #                   )
 
     def place(self) -> None:
         self.active_workers.append(self.workers[0])
@@ -227,6 +227,13 @@ class RayGPUExecutor(DistributedGPUExecutor):
         self._run_workers("update_distributed_group_manager", all_kwargs=all_args_to_update_distributed_group, active_worker=False)
 
         self.parallel_config.tensor_parallel_size = 1 + len(self.active_workers)
+
+        self._run_workers("reload_model",
+                          max_concurrent_workers=self.parallel_config.
+                          max_parallel_loading_workers,
+                          active_worker=True,
+                          )
+
 
 
     def _driver_execute_model(
