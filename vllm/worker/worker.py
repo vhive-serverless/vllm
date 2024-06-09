@@ -23,6 +23,9 @@ from vllm.worker.embedding_model_runner import EmbeddingModelRunner
 from vllm.worker.model_runner import ModelRunner
 from vllm.worker.worker_base import WorkerBase
 from vllm.utils import get_distributed_init_method
+from vllm.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 class Worker(WorkerBase):
@@ -174,6 +177,14 @@ class Worker(WorkerBase):
         """
         # Profile the memory usage of the model and get the maximum number of
         # cache blocks that can be allocated with the remaining free memory.
+
+        if hasattr(self, 'cache_engine'):
+            self.cache_engine.free()
+            del self.cache_engine
+            self.cache_engine = None
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+
         torch.cuda.empty_cache()
 
         # Execute a forward pass with dummy inputs to profile the memory usage
@@ -223,6 +234,7 @@ class Worker(WorkerBase):
 
     def _init_cache_engine(self):
         assert self.cache_config.num_gpu_blocks is not None
+
         self.cache_engine = CacheEngine(self.cache_config, self.model_config,
                                         self.parallel_config)
         self.gpu_cache = self.cache_engine.gpu_cache

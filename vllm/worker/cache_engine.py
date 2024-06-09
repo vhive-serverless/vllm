@@ -91,6 +91,19 @@ class CacheEngine:
     def copy(self, src_to_dsts: torch.Tensor) -> None:
         self.attn_backend.copy_blocks(self.gpu_cache, src_to_dsts)
 
+    
+    def free(self) -> None:
+        self.gpu_cache.clear()
+        del self.gpu_cache
+        self.gpu_cache = None
+        del self.cpu_cache
+        self.cpu_cache = None
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+
     @staticmethod
     def get_cache_block_size(
         cache_config: CacheConfig,
@@ -114,3 +127,4 @@ class CacheEngine:
 
 def _get_dtype_size(dtype: torch.dtype) -> int:
     return torch.tensor([], dtype=dtype).element_size()
+
