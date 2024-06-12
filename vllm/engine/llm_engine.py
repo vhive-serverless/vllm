@@ -160,6 +160,8 @@ class LLMEngine:
         log_stats: bool,
         usage_context: UsageContext = UsageContext.ENGINE_CONTEXT,
     ) -> None:
+        import time
+        start = time.time()
         logger.info(
             "Initializing an LLM engine (v%s) with config: "
             "model=%r, speculative_config=%r, tokenizer=%r, "
@@ -234,8 +236,11 @@ class LLMEngine:
             load_config=load_config,
         )
 
-        if not self.model_config.embedding_mode:
-            self._initialize_kv_caches()
+        cache_start = time.time()
+        # if not self.model_config.embedding_mode:
+        #     self._initialize_kv_caches()
+        cache_init_latency = time.time() - cache_start
+        logger.info(f"cache init latency: {cache_init_latency:.1f}s")
 
         # If usage stat is enabled, collect relevant info.
         if is_usage_stats_enabled():
@@ -305,6 +310,7 @@ class LLMEngine:
                 ),
             ))
 
+
     def _initialize_kv_caches(self) -> None:
         """Initialize the KV cache in the worker(s).
 
@@ -335,10 +341,12 @@ class LLMEngine:
     ) -> "LLMEngine":
         """Creates an LLM engine from the engine arguments."""
         # Create the engine configs.
+        import time
         engine_config = engine_args.create_engine_config()
         distributed_executor_backend = (
             engine_config.parallel_config.distributed_executor_backend)
 
+        start = time.time()
         # Initialize the cluster and specify the executor class.
         if engine_config.device_config.device_type == "neuron":
             from vllm.executor.neuron_executor import NeuronExecutor
@@ -357,6 +365,8 @@ class LLMEngine:
         else:
             from vllm.executor.gpu_executor import GPUExecutor
             executor_class = GPUExecutor
+        latency = time.time() - start
+        logger.info(f"init ray cluster latency: {latency:.1f}s")
 
         # Create the LLM engine.
         engine = cls(

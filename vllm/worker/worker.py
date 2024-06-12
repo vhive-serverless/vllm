@@ -182,8 +182,6 @@ class Worker(WorkerBase):
             self.cache_engine.free()
             del self.cache_engine
             self.cache_engine = None
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()
 
         torch.cuda.empty_cache()
 

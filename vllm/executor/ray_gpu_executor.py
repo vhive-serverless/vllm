@@ -62,6 +62,7 @@ class RayGPUExecutor(DistributedGPUExecutor):
 
     def _init_workers_ray(self, placement_group: "PlacementGroup",
                           **ray_remote_kwargs):
+        import time
         if self.parallel_config.tensor_parallel_size == 1:
             # For single GPU case, we use a ray worker with constrained memory.
             num_gpus = self.cache_config.gpu_memory_utilization
@@ -86,6 +87,7 @@ class RayGPUExecutor(DistributedGPUExecutor):
         # Create the workers.
         driver_ip = get_ip()
         rank = 0
+        init_workers_start = time.time()
         for bundle_id, bundle in enumerate(placement_group.bundle_specs):
             if not bundle.get("GPU", 0):
                 continue
@@ -130,13 +132,15 @@ class RayGPUExecutor(DistributedGPUExecutor):
                 self.workers.append(worker)
             rank += 1
 
+        init_workers_latency = time.time() - init_workers_start
+        logger.info(f"init workers(model_runner) latency: {init_workers_latency:.1f}s")
+
 
         if self.driver_dummy_worker is None:
             raise ValueError(
                 "Ray does not allocate any GPUs on the driver node. Consider "
                 "adjusting the Ray placement group or running the driver on a "
                 "GPU node.")
-
         # Get the set of GPU IDs used on each node.
         worker_node_and_gpu_ids = self._run_workers("get_node_and_gpu_ids",
                                                     use_dummy_driver=True, active_worker=False)
@@ -179,6 +183,7 @@ class RayGPUExecutor(DistributedGPUExecutor):
         self._run_workers("init_worker", all_kwargs=init_worker_all_kwargs, active_worker=False)
 
         self._run_workers("init_device", active_worker=False)
+
 
         all_args_to_init_distributed_group = []
         world_size = 1 + len(self.workers)
@@ -224,18 +229,27 @@ class RayGPUExecutor(DistributedGPUExecutor):
                 }
             )
 
+        import time        
+        start = time.time()
         self._run_workers("update_distributed_group_manager", all_kwargs=all_args_to_update_distributed_group, active_worker=False)
+        create_distributed_group_latency = time.time() - start
+        logger.info(f"Create distributed group takes: {create_distributed_group_latency:.1f}s")
 
         self.parallel_config.tensor_parallel_size = 1 + len(self.active_workers)
-
+        start = time.time()
         self._run_workers("reload_model",
                           max_concurrent_workers=self.parallel_config.
                           max_parallel_loading_workers,
                           active_worker=True,
                           )
+        loading_latency = time.time() - start
+        logger.info(f"Load model takes: {loading_latency:.1f}s")
 
+        start = time.time()
         num_gpu_blocks, num_cpu_blocks = (
             self.determine_num_available_blocks())
+
+        profile_run_latency = time.time() - start
 
         if self.cache_config.num_gpu_blocks_override is not None:
             num_gpu_blocks_override = self.cache_config.num_gpu_blocks_override
@@ -247,8 +261,9 @@ class RayGPUExecutor(DistributedGPUExecutor):
 
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
-
         self.initialize_cache(num_gpu_blocks, num_cpu_blocks)
+        init_cache_latency = time.time() - start
+        logger.info(f"init_cache_latency: {init_cache_latency:.1f}s, where profile run takes {profile_run_latency:.1f}s and init tensor takes: {init_cache_latency - profile_run_latency:.1f}s")
 
 
 
