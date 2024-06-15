@@ -31,7 +31,7 @@ from vllm.model_executor.model_loader.weight_utils import (
     download_safetensors_index_file_from_hf, download_weights_from_hf,
     filter_duplicate_safetensors_files, filter_files_not_needed_for_inference,
     get_quant_config, initialize_dummy_weights, np_cache_weights_iterator,
-    pt_weights_iterator, safetensors_weights_iterator)
+    pt_weights_iterator, safetensors_weights_iterator, checkpoint_weights_iterator)
 from vllm.model_executor.models.vlm_base import VisionLanguageModelBase
 from vllm.model_executor.utils import set_weight_attrs
 
@@ -117,6 +117,33 @@ class BaseModelLoader(ABC):
                    cache_config: CacheConfig) -> nn.Module:
         """Load a model with the given configurations."""
         ...
+
+class CheckpointModelLoader(BaseModelLoader):
+    """Model loader that can load different file types from disk."""
+
+
+    def __init__(self, load_config: LoadConfig):
+        super().__init__(load_config)
+        if load_config.model_loader_extra_config:
+            raise ValueError(f"Model loader extra config is not supported for "
+                             f"load format {load_config.load_format}")
+
+    def load_model(self, *, model_config: ModelConfig,
+                   device_config: DeviceConfig,
+                   lora_config: Optional[LoRAConfig],
+                   vision_language_config: Optional[VisionLanguageConfig],
+                   parallel_config: ParallelConfig,
+                   scheduler_config: SchedulerConfig,
+                   cache_config: CacheConfig) -> nn.Module:
+        with set_default_torch_dtype(model_config.dtype):
+            with torch.device(device_config.device):
+                model = _initialize_model(model_config, self.load_config,
+                                          lora_config, vision_language_config,
+                                          cache_config)
+            from checkpoint_store import load_model
+            checkpoint = load_model(model_config.model)
+            model.load_weights(checkpoint_weights_iterator(checkpoint))
+        return model.eval()
 
 
 class DefaultModelLoader(BaseModelLoader):
@@ -798,5 +825,8 @@ def get_model_loader(load_config: LoadConfig) -> BaseModelLoader:
 
     if load_config.load_format == LoadFormat.BITSANDBYTES:
         return BitsAndBytesModelLoader(load_config)
+
+    if load_config.load_format == LoadFormat.CHECKPOINT:
+        return CheckpointModelLoader(load_config)
 
     return DefaultModelLoader(load_config)

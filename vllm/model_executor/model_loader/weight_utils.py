@@ -7,6 +7,7 @@ import os
 import tempfile
 from collections import defaultdict
 from typing import Any, Generator, Iterable, List, Optional, Tuple
+from transformers import AutoModelForCausalLM
 
 import filelock
 import huggingface_hub.constants
@@ -360,6 +361,14 @@ def safetensors_weights_iterator(
                 param = f.get_tensor(name)
                 yield name, param
 
+def checkpoint_weights_iterator(
+    model: AutoModelForCausalLM
+)  -> Generator[Tuple[str, torch.Tensor], None, None]:
+    weights = model.state_dict()
+    for name, param in weights.items():
+        yield name, param
+    del weights
+    torch.cuda.empty_cache()
 
 def pt_weights_iterator(
     hf_weights_files: List[str]
