@@ -141,7 +141,10 @@ class CheckpointModelLoader(BaseModelLoader):
                                           lora_config, vision_language_config,
                                           cache_config)
             from checkpoint_store import load_model
-            checkpoint = load_model(model_config.model)
+            import os
+
+            home_directory = os.path.expanduser("~")
+            checkpoint = load_model(model_config.model, storage_path=f"{home_directory}/.cache/checkpoint-models")
             model.load_weights(checkpoint_weights_iterator(checkpoint))
         return model.eval()
 
