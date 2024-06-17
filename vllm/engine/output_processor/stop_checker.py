@@ -45,36 +45,36 @@ class StopChecker:
         if seq.get_output_len() < sampling_params.min_tokens:
             return
 
-        # Check if the sequence has generated the EOS token.
-        if ((not sampling_params.ignore_eos)
-                and seq.get_last_token_id() == seq.eos_token_id):
-            # Remove the last EOS token unless explicitly specified
-            # This prevents unintended exposure of the EOS token
-            if new_char_count and (
-                    not sampling_params.include_stop_str_in_output):
-                seq.output_text = seq.output_text[:-new_char_count]
-            seq.status = SequenceStatus.FINISHED_STOPPED
-            return
+        # # Check if the sequence has generated the EOS token.
+        # if ((not sampling_params.ignore_eos)
+        #         and seq.get_last_token_id() == seq.eos_token_id):
+        #     # Remove the last EOS token unless explicitly specified
+        #     # This prevents unintended exposure of the EOS token
+        #     if new_char_count and (
+        #             not sampling_params.include_stop_str_in_output):
+        #         seq.output_text = seq.output_text[:-new_char_count]
+        #     seq.status = SequenceStatus.FINISHED_STOPPED
+        #     return
 
-        # Check if a stop token was encountered.
-        # This assumes a single token produced per step.
-        last_token_id = seq.get_last_token_id()
-        if last_token_id in sampling_params.stop_token_ids:
-            if new_char_count and (
-                    not sampling_params.include_stop_str_in_output):
-                # Remove last token
-                seq.output_text = seq.output_text[:-new_char_count]
-            seq.status = SequenceStatus.FINISHED_STOPPED
-            seq.stop_reason = last_token_id
-            return
+        # # Check if a stop token was encountered.
+        # # This assumes a single token produced per step.
+        # last_token_id = seq.get_last_token_id()
+        # if last_token_id in sampling_params.stop_token_ids:
+        #     if new_char_count and (
+        #             not sampling_params.include_stop_str_in_output):
+        #         # Remove last token
+        #         seq.output_text = seq.output_text[:-new_char_count]
+        #     seq.status = SequenceStatus.FINISHED_STOPPED
+        #     seq.stop_reason = last_token_id
+        #     return
 
-        # Check if any stop strings are matched.
-        stop_str = self._check_stop_strings(seq, new_char_count,
-                                            sampling_params)
-        if stop_str is not None:
-            seq.status = SequenceStatus.FINISHED_STOPPED
-            seq.stop_reason = stop_str
-            return
+        # # Check if any stop strings are matched.
+        # stop_str = self._check_stop_strings(seq, new_char_count,
+        #                                     sampling_params)
+        # if stop_str is not None:
+        #     seq.status = SequenceStatus.FINISHED_STOPPED
+        #     seq.stop_reason = stop_str
+        #     return
 
         # Check if the sequence has reached max_model_len.
         if seq.get_len() > self._get_max_model_len(lora_req):
