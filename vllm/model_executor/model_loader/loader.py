@@ -31,7 +31,7 @@ from vllm.model_executor.model_loader.weight_utils import (
     download_safetensors_index_file_from_hf, download_weights_from_hf,
     filter_duplicate_safetensors_files, filter_files_not_needed_for_inference,
     get_quant_config, initialize_dummy_weights, np_cache_weights_iterator,
-    pt_weights_iterator, safetensors_weights_iterator)
+    pt_weights_iterator, safetensors_weights_iterator, checkpoint_weights_iterator)
 from vllm.model_executor.models.vlm_base import VisionLanguageModelBase
 from vllm.model_executor.utils import set_weight_attrs
 
@@ -781,6 +781,60 @@ class BitsAndBytesModelLoader(BaseModelLoader):
         return model.eval()
 
 
+class CheckpointModelLoader(BaseModelLoader):
+    """Model loader to load model weights with Checkpoints Loader"""
+    def __init__(self, load_config: LoadConfig):
+        super().__init__(load_config)
+        if load_config.model_loader_extra_config:
+            raise ValueError(f"Model loader extra config is not supported for "
+                             f"load format {load_config.load_format}")
+
+    def _prepare_weights(self, model_name: str, storage_path: str):
+        """Prepare weight files for checkpoint loader.
+        
+        If model haven't been converted to checkpoint format, it will load the model using traditional way and convert it into checkpoint format"""
+        model_path = os.path.join(storage_path, model_name)
+        is_local = os.path.isdir(model_path)
+        if is_local:
+            return
+
+        # Load the original model
+        from transformers import AutoModelForCausalLM
+        model = AutoModelForCausalLM.from_pretrained(model_name)
+
+        # Convert into checkpoint loader
+        from checkpoint_store import save_model
+        save_model(model, model_path)
+    
+    def _get_weights_iterator(self, model_name: str, storage_path: str) -> Generator[Tuple[str, torch.Tensor], None, None]:
+        """Get an iterator for the model weights based on the load format"""
+        self._prepare_weights(model_name, storage_path)
+        return checkpoint_weights_iterator(model_name, storage_path) 
+    
+    def load_model(self, *, model_config: ModelConfig,
+                   device_config: DeviceConfig,
+                   lora_config: Optional[LoRAConfig],
+                   vision_language_config: Optional[VisionLanguageConfig],
+                   parallel_config: ParallelConfig,
+                   scheduler_config: SchedulerConfig,
+                   cache_config: CacheConfig) -> nn.Module:
+        with set_default_torch_dtype(model_config.dtype):
+            with torch.device(device_config.device):
+                model = _initialize_model(model_config, self.load_config,
+                                          lora_config, vision_language_config,
+                                          cache_config)
+            model.load_weights(self._get_weights_iterator(model_config.model,self.load_config.download_dir))
+            for _, module in model.named_modules():
+                quant_method = getattr(module, "quant_method", None)
+                if quant_method is not None:
+                    quant_method.process_weights_after_loading(module)
+                # FIXME: Remove this after Mixtral is updated
+                # to use quant_method.
+                if hasattr(module, "process_weights_after_loading"):
+                    module.process_weights_after_loading()
+        return model.eval()
+
+
 def get_model_loader(load_config: LoadConfig) -> BaseModelLoader:
     """Get a model loader based on the load format."""
 
@@ -798,5 +852,8 @@ def get_model_loader(load_config: LoadConfig) -> BaseModelLoader:
 
     if load_config.load_format == LoadFormat.BITSANDBYTES:
         return BitsAndBytesModelLoader(load_config)
+    
+    if load_config.load_format == LoadFormat.CHECKPOINT:
+        return CheckpointModelLoader(load_config)
 
     return DefaultModelLoader(load_config)

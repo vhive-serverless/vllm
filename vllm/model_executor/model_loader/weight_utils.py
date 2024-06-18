@@ -14,6 +14,7 @@ import numpy as np
 import torch
 from huggingface_hub import HfFileSystem, hf_hub_download, snapshot_download
 from safetensors.torch import load_file, safe_open, save_file
+from checkpoint_store import load_dict
 from tqdm.auto import tqdm
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
@@ -371,6 +372,16 @@ def pt_weights_iterator(
             yield name, param
         del state
         torch.cuda.empty_cache()
+
+
+def checkpoint_weights_iterator(
+    model_name: str,
+    storage_path: str,
+) -> Generator[Tuple[str, torch.Tensor], None, None]:
+    """Iterate over the weights in the model state dict"""
+    state_dict = load_dict(model_name, storage_path=storage_path)
+    for name, param in state_dict.items():
+        yield name, param
 
 
 def kv_cache_scales_loader(
