@@ -1006,7 +1006,8 @@ class ServerlessLLMLoader(BaseModelLoader):
         # move all tensors to CPU
         for key, tensor in state_dict.items():
             state_dict[key] = tensor.cpu().contiguous()
-            
+
+        os.makedirs(os.path.join(path, f"rank_{rank}"), exist_ok=True)  
         save_dict(state_dict, os.path.join(path, f"rank_{rank}"))
 
 
