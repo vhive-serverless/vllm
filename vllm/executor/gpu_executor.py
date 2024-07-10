@@ -107,6 +107,16 @@ class GPUExecutor(ExecutorBase):
         # it's running.
         return
 
+    def save_serverless_llm_state(
+        self,
+        path: str,
+        pattern: Optional[str] = None,
+        max_size: Optional[int] = None,
+    ) -> None:
+        self.driver_worker.save_serverless_llm_state(
+            path=path, pattern=pattern, max_size=max_size
+        )
+
 
 class GPUExecutorAsync(GPUExecutor, ExecutorAsyncBase):
 
