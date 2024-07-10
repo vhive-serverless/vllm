@@ -221,6 +221,20 @@ class ModelRunner:
             pattern=pattern,
             max_size=max_size,
         )
+    def save_serverless_llm_state(
+        self,
+        path: str,
+        pattern: Optional[str] = None,
+        max_size: Optional[int] = None,
+    ) -> None:
+        from vllm.model_executor.model_loader.loader import ServerlessLLMLoader
+        ServerlessLLMLoader.save_model(
+            self.model,
+            path,
+            pattern=pattern,
+            max_size=max_size,
+        )
+
 
     def get_max_block_per_batch(self) -> int:
         block_size = self.block_size

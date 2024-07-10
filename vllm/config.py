@@ -497,6 +497,7 @@ class LoadFormat(str, enum.Enum):
     TENSORIZER = "tensorizer"
     SHARDED_STATE = "sharded_state"
     BITSANDBYTES = "bitsandbytes"
+    SERVERLESS_LLM = "serverless_llm"
 
 
 @dataclass
