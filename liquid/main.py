@@ -4,6 +4,8 @@ from vllm.executor.multiproc_worker_utils import (ProcessWorkerWrapper,
 
 from vllm.worker.worker_base import WorkerWrapperBase
 from vllm.engine.arg_utils import EngineArgs
+from vllm.sequence import ExecuteModelRequest, SequenceGroupMetadata, SequenceData, SamplingParams
+from vllm.core.block_manager_v2 import BlockTable
 from functools import partial
 from typing import Optional, List, Dict, Any
 from vllm.utils import get_distributed_init_method, get_ip, get_open_port
@@ -59,8 +61,34 @@ def main() -> None:
     # result_handler.start()
     driver_worker.init_device()
     driver_worker.load_model()
-    time.sleep(20)
+
+    num_gpu_blocks, num_cpu_blocks = driver_worker.determine_num_available_blocks()
     
+    print(f"number of gpu blocks: {num_gpu_blocks}, number of cpu blocks: {num_cpu_blocks}")
+
+    driver_worker.initialize_cache(
+         num_gpu_blocks, num_cpu_blocks,
+    )
+    prompt_token_ids = [6,1,9]
+    sampling_params = SamplingParams(temperature=0, min_tokens=1, max_tokens=2)
+    block_tables = {0:[]}
+    seq_data = SequenceData(prompt_token_ids=prompt_token_ids)
+    seq_group_metadata = SequenceGroupMetadata(
+         request_id="0",
+         is_prompt=True,
+         seq_data=seq_data,
+         sampling_params=sampling_params,
+         block_tables=
+         
+    )
+    seq_group_metadata_list = [seq_group_metadata]
+
+    execute_model_request = ExecuteModelRequest(
+         seq_group_metadata_list=seq_group_metadata_list,
+         blocks_to_swap_in=[],
+         blocks_to_swap_out=[],
+         blocks_to_copy=[],
+    )
 
 if __name__ == '__main__':
     main()
