@@ -44,7 +44,7 @@ def _create_worker(local_rank: int = 0,
                    rank: int = 0,
                    distributed_init_method: Optional[str] = None):
 
-        worker_module_name = "vllm.worker.worker"
+        worker_module_name = "vllm.worker.liquid_worker"
         worker_class_name = "Worker"
 
         wrapper = WorkerWrapperBase(
