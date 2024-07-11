@@ -187,3 +187,5 @@ hip_compat.h
 
 # Benchmark dataset
 *.json
+
+liquid/sharded_models_opt125m_4/*

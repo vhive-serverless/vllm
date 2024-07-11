@@ -70,15 +70,15 @@ def main() -> None:
          num_gpu_blocks, num_cpu_blocks,
     )
     prompt_token_ids = [6,1,9]
-    sampling_params = SamplingParams(temperature=0, min_tokens=1, max_tokens=2)
-    block_tables = {0:[]}
+    sampling_params = SamplingParams(temperature=0, min_tokens=3, max_tokens=4)
+    block_tables = {0:[0]}
     seq_data = SequenceData(prompt_token_ids=prompt_token_ids)
     seq_group_metadata = SequenceGroupMetadata(
          request_id="0",
          is_prompt=True,
-         seq_data=seq_data,
+         seq_data={0:seq_data},
          sampling_params=sampling_params,
-         block_tables=
+         block_tables=block_tables
          
     )
     seq_group_metadata_list = [seq_group_metadata]
@@ -89,6 +89,11 @@ def main() -> None:
          blocks_to_swap_out=[],
          blocks_to_copy=[],
     )
+
+    sampler_outputs = driver_worker.execute_model(execute_model_req=execute_model_request)
+
+    output_token_id = sampler_outputs[0].outputs[0].samples[0].output_token
+    print(f"output_token_id: {output_token_id}")
 
 if __name__ == '__main__':
     main()
