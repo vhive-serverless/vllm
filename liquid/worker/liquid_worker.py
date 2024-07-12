@@ -19,7 +19,7 @@ from vllm.sequence import ExecuteModelRequest, PoolerOutput, SamplerOutput
 from vllm.worker.cache_engine import CacheEngine
 from vllm.worker.embedding_model_runner import EmbeddingModelRunner
 from vllm.worker.model_runner import ModelRunner
-from vllm.worker.liquid_model_runner import LiquidModelRunner
+from liquid.worker.liquid_model_runner import LiquidModelRunner
 from vllm.worker.worker_base import WorkerBase
 
 

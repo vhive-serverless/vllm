@@ -1,3 +1,6 @@
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from vllm.executor.multiproc_worker_utils import (ProcessWorkerWrapper,
                                                   ResultHandler, WorkerMonitor)
@@ -44,7 +47,7 @@ def _create_worker(local_rank: int = 0,
                    rank: int = 0,
                    distributed_init_method: Optional[str] = None):
 
-        worker_module_name = "vllm.worker.liquid_worker"
+        worker_module_name = "liquid.worker.liquid_worker"
         worker_class_name = "Worker"
 
         wrapper = WorkerWrapperBase(
