@@ -14,7 +14,7 @@ from vllm.config import (CacheConfig, DecodingConfig, DeviceConfig, LoadConfig,
 from vllm.core.scheduler import (ScheduledSequenceGroup, Scheduler,
                                  SchedulerOutputs)
 from vllm.engine.arg_utils import EngineArgs
-from vllm.engine.metrics import StatLogger, Stats
+from vllm.engine.metrics import StatLogger, Stats, EngineMetrics
 from vllm.engine.output_processor.interfaces import (
     SequenceGroupOutputProcessor)
 from vllm.engine.output_processor.stop_checker import StopChecker
@@ -157,6 +157,7 @@ class LLMEngine:
         executor_class: Type[ExecutorBase],
         log_stats: bool,
         usage_context: UsageContext = UsageContext.ENGINE_CONTEXT,
+        metrics_record: bool = True,
     ) -> None:
         logger.info(
             "Initializing an LLM engine (v%s) with config: "
@@ -207,6 +208,7 @@ class LLMEngine:
         self.speculative_config = speculative_config
         self.load_config = load_config
         self.decoding_config = decoding_config or DecodingConfig()
+        self.metrics_record = metrics_record
         self.log_stats = log_stats
 
         if not self.model_config.skip_tokenizer_init:
@@ -287,6 +289,10 @@ class LLMEngine:
                 labels=dict(model_name=model_config.served_model_name),
                 max_model_len=self.model_config.max_model_len)
             self.stat_logger.info("cache_config", self.cache_config)
+
+        if self.metrics_record:
+            self.mtrics: List[EngineMetrics] = []
+            self.total_tokens: int = 0
 
         # Create sequence output processor, e.g. for beam search or
         # speculative decoding.
@@ -781,6 +787,10 @@ class LLMEngine:
 
         # Log stats.
         self.do_log_stats(scheduler_outputs, output)
+        if self.metrics_record:
+            stats = self._get_stats(scheduler_outputs)
+            finished_tokens = sum(len(output.prompt_token_ids) + sum(len(output_tokens.token_ids)
+                                  for output_tokens in output.outputs) for output in request_outputs if output.finished)
 
         if not request_outputs:
             # Stop the execute model loop in parallel workers until there are
@@ -791,6 +801,17 @@ class LLMEngine:
             self.model_executor.stop_remote_worker_execution_loop()
 
         return request_outputs
+
+    def get_latest_metrics(self) -> EngineMetrics:
+        """Get the latest metrics."""
+        if not self.metrics or len(self.metrics) == 0:
+            stats = self._get_stats(scheduler_outputs=None)
+            return self._stats_to_metrics(stats)
+        return self.metrics[-1]
+
+    def get_metrics_history(self) -> List[EngineMetrics]:
+        """Get the metrics history."""
+        return self.metrics
 
     def do_log_stats(
             self,
@@ -975,3 +996,18 @@ class LLMEngine:
 
     def check_health(self) -> None:
         self.model_executor.check_health()
+
+    def _stats_to_metrics(self, stats: Stats, finished_tokens: int = 0) -> EngineMetrics:
+        self.total_tokens += stats.num_prompt_tokens_iter + stats.num_generation_tokens_iter - finished_tokens
+        return EngineMetrics(
+            now=time.time(),
+            num_running=stats.num_running_sys,
+            num_swapped=stats.num_swapped_sys,
+            num_waiting=stats.num_waiting_sys,
+            gpu_cache_usage=stats.gpu_cache_usage_sys,
+            cpu_cache_usage=stats.cpu_cache_usage_sys,
+            num_prompt_tokens=stats.num_prompt_tokens_iter,
+            num_generation_tokens=stats.num_generation_tokens_iter,
+            num_output_tokens=finished_tokens,
+            num_total_tokens=self.total_tokens,
+        )
