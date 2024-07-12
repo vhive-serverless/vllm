@@ -21,7 +21,9 @@ from vllm.worker.embedding_model_runner import EmbeddingModelRunner
 from vllm.worker.model_runner import ModelRunner
 from liquid.worker.liquid_model_runner import LiquidModelRunner
 from vllm.worker.worker_base import WorkerBase
+from vllm.logger import init_logger
 
+logger = init_logger(__name__)
 
 class Worker(WorkerBase):
     """A worker class that executes (a partition of) the model on a GPU.
@@ -72,17 +74,18 @@ class Worker(WorkerBase):
 
         ModelRunnerClass = LiquidModelRunner
         self.model_runner = ModelRunnerClass(
-            model_config,
-            parallel_config,
-            scheduler_config,
-            device_config,
-            cache_config,
-            load_config=load_config,
-            lora_config=self.lora_config,
-            kv_cache_dtype=self.cache_config.cache_dtype,
-            is_driver_worker=is_driver_worker,
-            vision_language_config=vision_language_config,
+                model_config,
+                parallel_config,
+                scheduler_config,
+                device_config,
+                cache_config,
+                load_config=load_config,
+                lora_config=self.lora_config,
+                kv_cache_dtype=self.cache_config.cache_dtype,
+                is_driver_worker=is_driver_worker,
+                vision_language_config=vision_language_config,
         )
+            
         # Uninitialized cache engine. Will be initialized by
         # initialize_cache.
         self.cache_engine: CacheEngine

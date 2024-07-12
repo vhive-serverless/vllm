@@ -20,6 +20,7 @@ from vllm.lora.request import LoRARequest
 from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.model_loader import get_model
+from liquid.model_executor.model_loader.loader import LiquidShardedStateLoader
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.sampling_params import SamplingParams
 from vllm.sequence import SamplerOutput, SequenceData, SequenceGroupMetadata
@@ -86,6 +87,7 @@ class LiquidModelRunner:
         is_driver_worker: bool = False,
         vision_language_config: Optional[VisionLanguageConfig] = None,
     ):
+
         self.model_config = model_config
         self.parallel_config = parallel_config
         self.scheduler_config = scheduler_config
@@ -144,10 +146,10 @@ class LiquidModelRunner:
 
     def load_model(self) -> None:
         with CudaMemoryProfiler() as m:
-            self.model = get_model(
+            model_loader = LiquidShardedStateLoader(load_config=self.load_config)
+            self.model = model_loader.load_model(
                 model_config=self.model_config,
                 device_config=self.device_config,
-                load_config=self.load_config,
                 lora_config=self.lora_config,
                 vision_language_config=self.vision_language_config,
                 parallel_config=self.parallel_config,

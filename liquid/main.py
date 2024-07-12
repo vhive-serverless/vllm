@@ -14,7 +14,7 @@ from typing import Optional, List, Dict, Any
 from vllm.utils import get_distributed_init_method, get_ip, get_open_port
 import time
 
-model = "facebook/opt-125m"
+model = "liquid/sharded_models_opt125m_4/"
 engine_args = EngineArgs(model=model)
 engine_config = engine_args.create_engine_config()
 
@@ -65,38 +65,38 @@ def main() -> None:
     driver_worker.init_device()
     driver_worker.load_model()
 
-    num_gpu_blocks, num_cpu_blocks = driver_worker.determine_num_available_blocks()
+    # num_gpu_blocks, num_cpu_blocks = driver_worker.determine_num_available_blocks()
     
-    print(f"number of gpu blocks: {num_gpu_blocks}, number of cpu blocks: {num_cpu_blocks}")
+    # print(f"number of gpu blocks: {num_gpu_blocks}, number of cpu blocks: {num_cpu_blocks}")
 
-    driver_worker.initialize_cache(
-         num_gpu_blocks, num_cpu_blocks,
-    )
-    prompt_token_ids = [6,1,9]
-    sampling_params = SamplingParams(temperature=0, min_tokens=3, max_tokens=4)
-    block_tables = {0:[0]}
-    seq_data = SequenceData(prompt_token_ids=prompt_token_ids)
-    seq_group_metadata = SequenceGroupMetadata(
-         request_id="0",
-         is_prompt=True,
-         seq_data={0:seq_data},
-         sampling_params=sampling_params,
-         block_tables=block_tables
+    # driver_worker.initialize_cache(
+    #      num_gpu_blocks, num_cpu_blocks,
+    # )
+    # prompt_token_ids = [6,1,9]
+    # sampling_params = SamplingParams(temperature=0, min_tokens=3, max_tokens=4)
+    # block_tables = {0:[0]}
+    # seq_data = SequenceData(prompt_token_ids=prompt_token_ids)
+    # seq_group_metadata = SequenceGroupMetadata(
+    #      request_id="0",
+    #      is_prompt=True,
+    #      seq_data={0:seq_data},
+    #      sampling_params=sampling_params,
+    #      block_tables=block_tables
          
-    )
-    seq_group_metadata_list = [seq_group_metadata]
+    # )
+    # seq_group_metadata_list = [seq_group_metadata]
 
-    execute_model_request = ExecuteModelRequest(
-         seq_group_metadata_list=seq_group_metadata_list,
-         blocks_to_swap_in=[],
-         blocks_to_swap_out=[],
-         blocks_to_copy=[],
-    )
+    # execute_model_request = ExecuteModelRequest(
+    #      seq_group_metadata_list=seq_group_metadata_list,
+    #      blocks_to_swap_in=[],
+    #      blocks_to_swap_out=[],
+    #      blocks_to_copy=[],
+    # )
 
-    sampler_outputs = driver_worker.execute_model(execute_model_req=execute_model_request)
+    # sampler_outputs = driver_worker.execute_model(execute_model_req=execute_model_request)
 
-    output_token_id = sampler_outputs[0].outputs[0].samples[0].output_token
-    print(f"output_token_id: {output_token_id}")
+    # output_token_id = sampler_outputs[0].outputs[0].samples[0].output_token
+    # print(f"output_token_id: {output_token_id}")
 
 if __name__ == '__main__':
     main()
