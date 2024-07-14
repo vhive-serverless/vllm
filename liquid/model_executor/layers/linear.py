@@ -4,6 +4,7 @@ from typing import Dict, List, Optional, Tuple
 import torch
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
+from liquid.sharded_parameter import ShardedParameter, QKVShardedParameter
 
 from vllm.distributed import (divide, get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size,
@@ -14,6 +15,7 @@ from vllm.logger import init_logger
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig, QuantizeMethodBase)
 from vllm.model_executor.utils import set_weight_attrs
+from typing import Any
 
 logger = init_logger(__name__)
 
@@ -90,11 +92,21 @@ class UnquantizedLinearMethod(LinearMethodBase):
                        input_size_per_partition: int,
                        output_partition_sizes: List[int], input_size: int,
                        output_size: int, params_dtype: torch.dtype,
+                       param_class: Any = Parameter,
                        **extra_weight_attrs):
-        weight = Parameter(torch.empty(sum(output_partition_sizes),
-                                       input_size_per_partition,
-                                       dtype=params_dtype),
-                           requires_grad=False)
+        if param_class == Parameter:
+            weight = param_class(torch.empty(sum(output_partition_sizes),
+                                        input_size_per_partition,
+                                        dtype=params_dtype),
+                            requires_grad=False)
+        else:
+            num_shards = extra_weight_attrs.get("num_shards", 1)
+            shard_dim = extra_weight_attrs.get("shard_dim", 0)
+            weight = param_class(data=torch.empty(sum(output_partition_sizes), input_size_per_partition, dtype=params_dtype),
+                                 num_shards = num_shards, shard_dim = shard_dim)
+            extra_weight_attrs.pop("num_shards")
+            extra_weight_attrs.pop("shard_dim")
+
         set_weight_attrs(weight, {"input_dim": 1, "output_dim": 0})
         layer.register_parameter("weight", weight)
         set_weight_attrs(weight, extra_weight_attrs)
@@ -229,7 +241,11 @@ class ColumnParallelLinear(LinearBase):
                  skip_bias_add: bool = False,
                  params_dtype: Optional[torch.dtype] = None,
                  quant_config: Optional[QuantizationConfig] = None,
-                 output_sizes: Optional[List[int]] = None):
+                 output_sizes: Optional[List[int]] = None,
+                 param_class = ShardedParameter,
+                 num_shards: int = 1,
+                 shard_dim: int = 1,
+                 ):
         super().__init__(input_size, output_size, skip_bias_add, params_dtype,
                          quant_config)
 
@@ -256,11 +272,16 @@ class ColumnParallelLinear(LinearBase):
             input_size=self.input_size,
             output_size=self.output_size,
             params_dtype=self.params_dtype,
-            weight_loader=self.weight_loader)
+            param_class=param_class,
+            weight_loader=self.weight_loader,
+            num_shards=num_shards,
+            shard_dim = shard_dim,
+            )
         if bias:
-            self.bias = Parameter(
+            self.bias = param_class(
                 torch.empty(self.output_size_per_partition,
-                            dtype=params_dtype))
+                            dtype=params_dtype),
+                            num_shards=num_shards, shard_dim=0)
             set_weight_attrs(self.bias, {
                 "output_dim": 0,
                 "weight_loader": self.weight_loader,
@@ -511,7 +532,10 @@ class QKVParallelLinear(ColumnParallelLinear):
                  bias: bool = True,
                  skip_bias_add: bool = False,
                  params_dtype: Optional[torch.dtype] = None,
-                 quant_config: Optional[QuantizationConfig] = None):
+                 quant_config: Optional[QuantizationConfig] = None,
+                 num_shards: int = 1,
+                 shard_dim: int = 1,
+                 ):
         self.hidden_size = hidden_size
         self.head_size = head_size
         self.total_num_heads = total_num_heads
@@ -543,7 +567,11 @@ class QKVParallelLinear(ColumnParallelLinear):
                          gather_output=False,
                          skip_bias_add=skip_bias_add,
                          params_dtype=params_dtype,
-                         quant_config=quant_config)
+                         quant_config=quant_config,
+                         param_class=QKVShardedParameter,
+                         num_shards=num_shards,
+                         shard_dim=shard_dim,
+                         )
 
     def weight_loader(self,
                       param: Parameter,
@@ -730,7 +758,11 @@ class RowParallelLinear(LinearBase):
                  skip_bias_add: bool = False,
                  params_dtype: Optional[torch.dtype] = None,
                  reduce_results: bool = True,
-                 quant_config: Optional[QuantizationConfig] = None):
+                 quant_config: Optional[QuantizationConfig] = None,
+                 param_class = ShardedParameter,
+                 num_shards: int = 1,
+                 shard_dim: int = 0,
+                 ):
         super().__init__(input_size, output_size, skip_bias_add, params_dtype,
                          quant_config)
 
@@ -748,6 +780,9 @@ class RowParallelLinear(LinearBase):
             input_size=self.input_size,
             output_size=self.output_size,
             params_dtype=self.params_dtype,
+            param_class = param_class,
+            num_shards=num_shards,
+            shard_dim=shard_dim,
             weight_loader=self.weight_loader)
         if not reduce_results and (bias and not skip_bias_add):
             raise ValueError("When not reduce the results, adding bias to the "

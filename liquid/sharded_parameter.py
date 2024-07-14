@@ -20,10 +20,12 @@ class ShardedParameter(Parameter):
         else:
             shard_ids = list(range(num_shards))
 
+        self.data = data
         self.num_shards: int = num_shards
         self.shard_ids: List[int] = shard_ids
         self.shard_dim: int = shard_dim
 
+        assert len(self.shape) > shard_dim, f"Tensor's shape: {self.shape} has a dimension of {len(self.shape)}, is smaller or equal to shard_dim: {shard_dim}"
         assert self.shape[self.shard_dim] % self.num_shards == 0, f"Tensor's {self.shard_dim} dim with length: {self.shape[self.shard_dim]} is not divisible by number of shards: {self.num_shards}"
 
         self.shard_size = self.shape[self.shard_dim] // self.num_shards

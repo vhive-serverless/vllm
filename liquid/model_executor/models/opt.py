@@ -35,11 +35,12 @@ from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig)
 from vllm.model_executor.layers.sampler import Sampler
-from vllm.model_executor.layers.vocab_parallel_embedding import (
+from liquid.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding)
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.sequence import SamplerOutput
+from typing import Dict, List, Any
 
 
 class OPTLearnedPositionalEmbedding(nn.Embedding):
@@ -356,3 +357,10 @@ class OPTForCausalLM(nn.Module):
                 weight_loader = getattr(param, "weight_loader",
                                         default_weight_loader)
                 weight_loader(param, loaded_weight)
+
+    def get_sharded_state_dict(self) -> Dict[str, torch.Tensor]:
+        state_dict = {}
+        for name, param in self.named_parameters():
+            if hasattr(param, "num_shards"):
+                state_dict[name] = param  
+        return state_dict

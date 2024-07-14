@@ -14,7 +14,7 @@ from typing import Optional, List, Dict, Any
 from vllm.utils import get_distributed_init_method, get_ip, get_open_port
 import time
 
-model = "liquid/sharded_models_opt125m_4/"
+model = "facebook/opt-125m"
 engine_args = EngineArgs(model=model)
 engine_config = engine_args.create_engine_config()
 
