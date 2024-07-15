@@ -5,6 +5,7 @@ import fnmatch
 import glob
 import json
 import math
+import gc
 import os
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Generator, List, Optional, Tuple, Type
