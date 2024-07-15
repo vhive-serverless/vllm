@@ -86,6 +86,7 @@ class LiquidModelRunner:
         kv_cache_dtype: Optional[str] = "auto",
         is_driver_worker: bool = False,
         vision_language_config: Optional[VisionLanguageConfig] = None,
+        shard_ids: List[int] = [],
     ):
 
         self.model_config = model_config

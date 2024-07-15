@@ -16,7 +16,7 @@ from vllm.distributed import (broadcast_tensor_dict,
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
 from vllm.sequence import ExecuteModelRequest, PoolerOutput, SamplerOutput
-from vllm.worker.cache_engine import CacheEngine
+from liquid.worker.cache_engine import CacheEngine
 from vllm.worker.embedding_model_runner import EmbeddingModelRunner
 from vllm.worker.model_runner import ModelRunner
 from liquid.worker.liquid_model_runner import LiquidModelRunner
@@ -24,6 +24,7 @@ from vllm.worker.worker_base import WorkerBase
 from vllm.logger import init_logger
 
 logger = init_logger(__name__)
+NUM_SHARDS = 4
 
 class Worker(WorkerBase):
     """A worker class that executes (a partition of) the model on a GPU.
@@ -48,6 +49,7 @@ class Worker(WorkerBase):
         vision_language_config: Optional[VisionLanguageConfig] = None,
         speculative_config: Optional[SpeculativeConfig] = None,
         is_driver_worker: bool = False,
+        shard_ids: List[int] = []
     ) -> None:
         self.model_config = model_config
         self.parallel_config = parallel_config
@@ -60,6 +62,8 @@ class Worker(WorkerBase):
         self.lora_config = lora_config
         self.load_config = load_config
         self.is_driver_worker = is_driver_worker
+        self.shard_ids = self.shard_ids
+
         if self.is_driver_worker:
             assert self.rank == 0, "The driver worker must have rank 0."
 
@@ -84,6 +88,7 @@ class Worker(WorkerBase):
                 kv_cache_dtype=self.cache_config.cache_dtype,
                 is_driver_worker=is_driver_worker,
                 vision_language_config=vision_language_config,
+                shard_ids=shard_ids,
         )
             
         # Uninitialized cache engine. Will be initialized by

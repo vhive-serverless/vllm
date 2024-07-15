@@ -1,4 +1,5 @@
 from sharded_parameter import ShardedParameter
+from sharded_tensor import ShardedTensor
 import torch
 
 def get_gpu_memory_usage():
@@ -20,11 +21,14 @@ if __name__ == "__main__":
         torch.full((tensor_size[0], shard_size), 3, dtype=torch.float32, device='cuda')
     ], dim=1)
 
-    # Create a ShardedParameter instance
-    sharded_param = ShardedParameter(data=data, num_shards=num_shards, shard_dim=1)
     memory_usage = get_gpu_memory_usage()
-    del data
     print(f"initial_memory_usage: {memory_usage:.3f} GB")
+    # # Create a ShardedParameter instance
+    sharded_param = ShardedTensor(data=data, num_shards=num_shards, shard_dim=1)
+    # clone_data = data.clone()
+
+
+    del data
 
     # Delete shard 1 (second shard, full of 1) and shard 3 (fourth shard, full of 3)
     sharded_param.delete_shard(1)
@@ -32,6 +36,7 @@ if __name__ == "__main__":
 
     # Get the second shard 
     remaining_shard = sharded_param.get_shard(2)
+
     memory_usage = get_gpu_memory_usage()
     print(f"current_memory_usage: {memory_usage:.3f} GB")
 
