@@ -291,7 +291,7 @@ class LLMEngine:
             self.stat_logger.info("cache_config", self.cache_config)
 
         if self.metrics_record:
-            self.mtrics: List[EngineMetrics] = []
+            self.metrics: List[EngineMetrics] = []
             self.total_tokens: int = 0
 
         # Create sequence output processor, e.g. for beam search or
