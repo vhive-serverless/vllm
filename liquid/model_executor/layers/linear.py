@@ -5,6 +5,7 @@ import torch
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
 from liquid.sharded_parameter import ShardedParameter, QKVShardedParameter
+from liquid.sharded_tensor import ShardedTensor, QKVShardedTensor
 
 from vllm.distributed import (divide, get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size,
@@ -248,7 +249,8 @@ class ColumnParallelLinear(LinearBase):
                  ):
         super().__init__(input_size, output_size, skip_bias_add, params_dtype,
                          quant_config)
-
+        self.num_shards = num_shards
+        self.shard_dim = shard_dim
         self.gather_output = gather_output
 
         # Divide the weight matrix along the last dimension.
@@ -323,6 +325,7 @@ class ColumnParallelLinear(LinearBase):
         else:
             output = output_parallel
         output_bias = self.bias if self.skip_bias_add else None
+        output = ShardedTensor(data=output, num_shards=self.num_shards,shard_dim=self.shard_dim)
         return output, output_bias
 
     def extra_repr(self) -> str:
@@ -536,6 +539,8 @@ class QKVParallelLinear(ColumnParallelLinear):
                  num_shards: int = 1,
                  shard_dim: int = 1,
                  ):
+        self.num_shards = num_shards
+        self.shard_dim = shard_dim
         self.hidden_size = hidden_size
         self.head_size = head_size
         self.total_num_heads = total_num_heads
@@ -572,6 +577,10 @@ class QKVParallelLinear(ColumnParallelLinear):
                          num_shards=num_shards,
                          shard_dim=shard_dim,
                          )
+
+    def forward(self, input_) -> QKVShardedTensor:
+        output, bias = super().forward(input_)
+        return QKVShardedTensor(data=output, num_shards=self.num_shards,shard_dim=self.shard_dim), bias 
 
     def weight_loader(self,
                       param: Parameter,
@@ -761,10 +770,13 @@ class RowParallelLinear(LinearBase):
                  quant_config: Optional[QuantizationConfig] = None,
                  param_class = ShardedParameter,
                  num_shards: int = 1,
-                 shard_dim: int = 0,
+                 shard_dim: int = 1,
                  ):
         super().__init__(input_size, output_size, skip_bias_add, params_dtype,
                          quant_config)
+
+        self.num_shards = num_shards
+        self.shard_dim = shard_dim
 
         self.input_is_parallel = input_is_parallel
         self.reduce_results = reduce_results
@@ -848,6 +860,8 @@ class RowParallelLinear(LinearBase):
         else:
             output = output_
             output_bias = self.bias
+
+
         return output, output_bias
 
     def extra_repr(self) -> str:

@@ -8,7 +8,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from vllm.attention import AttentionMetadata, get_attn_backend
+from liquid.attention import AttentionMetadata, get_attn_backend
 from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
                          ModelConfig, ParallelConfig, SchedulerConfig,
                          VisionLanguageConfig)

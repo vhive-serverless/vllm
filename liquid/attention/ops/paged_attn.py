@@ -1,10 +1,12 @@
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 
 import torch
 
 from vllm import _custom_ops as ops
 from vllm.attention.ops.prefix_prefill import context_attention_fwd
+from liquid.sharded_tensor import ShardedTensor
+from liquid.worker import NUM_SHARDS
 
 # Should be the same as PARTITION_SIZE in `paged_attention_v2_launcher`.
 _PARTITION_SIZE = 512
@@ -47,23 +49,22 @@ class PagedAttention:
         kv_cache: torch.Tensor,
         num_kv_heads: int,
         head_size: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[ShardedTensor, ShardedTensor]:
         x = 16 // kv_cache.element_size()
         num_blocks = kv_cache.shape[1]
 
         key_cache = kv_cache[0]
         key_cache = key_cache.view(num_blocks, num_kv_heads, head_size // x,
-                                   -1, x)
+                                -1, x)
         value_cache = kv_cache[1]
-        value_cache = value_cache.view(num_blocks, num_kv_heads, head_size, -1)
         return key_cache, value_cache
 
     @staticmethod
     def write_to_paged_cache(
-        key: torch.Tensor,
-        value: torch.Tensor,
-        key_cache: torch.Tensor,
-        value_cache: torch.Tensor,
+        key: ShardedTensor,
+        value: ShardedTensor,
+        key_cache: Dict[int,torch.Tensor],
+        value_cache: Dict[int,torch.Tensor],
         slot_mapping: torch.Tensor,
         kv_cache_dtype: str,
         kv_scale: float,
@@ -80,9 +81,9 @@ class PagedAttention:
 
     @staticmethod
     def forward_decode(
-        query: torch.Tensor,
-        key_cache: torch.Tensor,
-        value_cache: torch.Tensor,
+        query: ShardedTensor,
+        key_cache: Dict[int, torch.Tensor],
+        value_cache: Dict[int, torch.Tensor],
         block_tables: torch.Tensor,
         seq_lens: torch.Tensor,
         max_seq_len: int,
@@ -122,7 +123,6 @@ class PagedAttention:
 
         if use_v1:
             # Run PagedAttention V1.
-            print(f"We use paged attn v1")
             ops.paged_attention_v1(
                 output,
                 query,
@@ -144,7 +144,6 @@ class PagedAttention:
                 blocksparse_head_sliding_step,
             )
         else:
-            print(f"We use paged attn v2")
             # Run PagedAttention V2.
             assert _PARTITION_SIZE % block_size == 0
             tmp_output = torch.empty(

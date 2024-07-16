@@ -23,7 +23,7 @@ import torch
 from torch import nn
 from transformers import OPTConfig
 
-from vllm.attention import Attention, AttentionMetadata
+from liquid.attention import Attention, AttentionMetadata
 from vllm.config import CacheConfig
 from vllm.distributed import get_tensor_model_parallel_world_size
 from vllm.model_executor.layers.activation import get_act_fn
@@ -41,6 +41,7 @@ from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.sequence import SamplerOutput
 from typing import Dict, List, Any
+from liquid.worker import NUM_SHARDS
 
 
 class OPTLearnedPositionalEmbedding(nn.Embedding):
@@ -65,8 +66,10 @@ class OPTAttention(nn.Module):
         bias: bool = True,
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
+        shard_ids: List[int] = [],
     ) -> None:
         super().__init__()
+        self.shard_ids = shard_ids
         self.embed_dim = embed_dim
         tensor_model_parallel_world_size = (
             get_tensor_model_parallel_world_size())
@@ -82,23 +85,27 @@ class OPTAttention(nn.Module):
             total_num_heads,
             bias=bias,
             quant_config=quant_config,
+            num_shards=NUM_SHARDS,
         )
         self.out_proj = RowParallelLinear(
             embed_dim,
             embed_dim,
             bias=bias,
             quant_config=quant_config,
+            num_shards=NUM_SHARDS,
         )
-        self.attn = Attention(self.num_heads,
+        self.attn = Attention(
+                              self.num_heads,
                               self.head_dim,
                               scale=self.scaling,
                               cache_config=cache_config,
-                              quant_config=quant_config)
+                              quant_config=quant_config,
+                              shard_ids=self.shard_ids)
 
     def forward(
         self,
         hidden_states: torch.Tensor,
-        kv_cache: torch.Tensor,
+        kv_cache: Dict[int,torch.Tensor],
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         qkv, _ = self.qkv_proj(hidden_states)
@@ -115,16 +122,20 @@ class OPTDecoderLayer(nn.Module):
         config: OPTConfig,
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
+        shard_ids: List[int] = []
     ):
         super().__init__()
         self.config = config
         self.embed_dim = config.hidden_size
+        self.shard_ids = shard_ids
+
         self.self_attn = OPTAttention(
             embed_dim=self.embed_dim,
             num_heads=config.num_attention_heads,
             bias=config.enable_bias,
             cache_config=cache_config,
             quant_config=quant_config,
+            shard_ids=shard_ids
         )
         self.do_layer_norm_before = config.do_layer_norm_before
 
@@ -136,6 +147,7 @@ class OPTDecoderLayer(nn.Module):
             config.ffn_dim,
             bias=config.enable_bias,
             quant_config=quant_config,
+            num_shards=NUM_SHARDS,
         )
         self.activation_fn = get_act_fn(config.activation_function,
                                         quant_config, config.ffn_dim)
@@ -144,6 +156,7 @@ class OPTDecoderLayer(nn.Module):
             self.embed_dim,
             bias=config.enable_bias,
             quant_config=quant_config,
+            num_shards=NUM_SHARDS,
         )
         self.final_layer_norm = nn.LayerNorm(
             self.embed_dim,
@@ -152,7 +165,7 @@ class OPTDecoderLayer(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        kv_cache: torch.Tensor,
+        kv_cache: Dict[int, torch.Tensor],
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         # Self Attention
@@ -190,12 +203,14 @@ class OPTDecoder(nn.Module):
         config: OPTConfig,
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
+        shard_ids: List[int] = []
     ):
         super().__init__()
         self.config = config
         self.padding_idx = config.pad_token_id
         self.max_target_positions = config.max_position_embeddings
         self.vocab_size = config.vocab_size
+        self.shard_ids = shard_ids
 
         self.embed_tokens = VocabParallelEmbedding(
             config.vocab_size,
@@ -234,7 +249,7 @@ class OPTDecoder(nn.Module):
             self.final_layer_norm = None
 
         self.layers = nn.ModuleList([
-            OPTDecoderLayer(config, cache_config, quant_config)
+            OPTDecoderLayer(config, cache_config, quant_config, shard_ids)
             for _ in range(config.num_hidden_layers)
         ])
 
@@ -242,7 +257,7 @@ class OPTDecoder(nn.Module):
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
-        kv_caches: List[torch.Tensor],
+        kv_caches: List[Dict[int, torch.Tensor]],
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         inputs_embeds = self.embed_tokens(input_ids)
@@ -269,15 +284,17 @@ class OPTModel(nn.Module):
         config: OPTConfig,
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
+        shard_ids: List[int] = [],
     ):
         super().__init__()
-        self.decoder = OPTDecoder(config, cache_config, quant_config)
+        self.decoder = OPTDecoder(config, cache_config, quant_config, shard_ids)
+        self.shard_ids = shard_ids
 
     def forward(
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
-        kv_caches: List[torch.Tensor],
+        kv_caches: List[Dict[int, torch.Tensor]],
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         return self.decoder(input_ids, positions, kv_caches, attn_metadata)
@@ -290,20 +307,22 @@ class OPTForCausalLM(nn.Module):
         config,
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
+        shard_ids: List[int] = [],
     ):
         super().__init__()
         self.config = config
         self.quant_config = quant_config
-        self.model = OPTModel(config, cache_config, quant_config)
+        self.model = OPTModel(config, cache_config, quant_config, shard_ids)
         self.lm_head_weight = self.model.decoder.embed_tokens.weight
         self.logits_processor = LogitsProcessor(config.vocab_size)
         self.sampler = Sampler()
+        self.shard_ids = shard_ids
 
     def forward(
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
-        kv_caches: List[torch.Tensor],
+        kv_caches: List[Dict[int, torch.Tensor]],
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         hidden_states = self.model(input_ids, positions, kv_caches,

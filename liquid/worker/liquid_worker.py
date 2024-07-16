@@ -22,9 +22,9 @@ from vllm.worker.model_runner import ModelRunner
 from liquid.worker.liquid_model_runner import LiquidModelRunner
 from vllm.worker.worker_base import WorkerBase
 from vllm.logger import init_logger
+from liquid.worker import NUM_SHARDS
 
 logger = init_logger(__name__)
-NUM_SHARDS = 4
 
 class Worker(WorkerBase):
     """A worker class that executes (a partition of) the model on a GPU.
@@ -62,7 +62,7 @@ class Worker(WorkerBase):
         self.lora_config = lora_config
         self.load_config = load_config
         self.is_driver_worker = is_driver_worker
-        self.shard_ids = self.shard_ids
+        self.shard_ids = shard_ids
 
         if self.is_driver_worker:
             assert self.rank == 0, "The driver worker must have rank 0."
@@ -205,7 +205,7 @@ class Worker(WorkerBase):
     def _init_cache_engine(self):
         assert self.cache_config.num_gpu_blocks is not None
         self.cache_engine = CacheEngine(self.cache_config, self.model_config,
-                                        self.parallel_config)
+                                        self.parallel_config, self.shard_ids)
         self.gpu_cache = self.cache_engine.gpu_cache
 
     def _warm_up_model(self) -> None:

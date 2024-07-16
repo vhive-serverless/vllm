@@ -1,5 +1,5 @@
 """CacheEngine class for managing the KV cache."""
-from typing import List
+from typing import List, Dict
 
 import torch
 
@@ -7,7 +7,8 @@ from vllm.attention import get_attn_backend
 from vllm.config import CacheConfig, ModelConfig, ParallelConfig
 from vllm.logger import init_logger
 from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, is_pin_memory_available
-from liquid.worker.liquid_worker import NUM_SHARDS
+from liquid.worker import NUM_SHARDS
+from liquid.sharded_tensor import ShardedTensor
 
 logger = init_logger(__name__)
 
@@ -25,6 +26,7 @@ class CacheEngine:
         cache_config: CacheConfig,
         model_config: ModelConfig,
         parallel_config: ParallelConfig,
+        shard_ids: List[int] = [],
     ) -> None:
         self.cache_config = cache_config
         self.model_config = model_config
@@ -37,6 +39,8 @@ class CacheEngine:
         self.block_size = cache_config.block_size
         self.num_gpu_blocks = cache_config.num_gpu_blocks
         self.num_cpu_blocks = cache_config.num_cpu_blocks
+
+        self.shard_ids = shard_ids
 
         if cache_config.cache_dtype == "auto":
             self.dtype = model_config.dtype
@@ -62,22 +66,27 @@ class CacheEngine:
         self,
         num_blocks: int,
         device: str,
-    ) -> List[torch.Tensor]:
+    ) -> List[ShardedTensor]:
         """Allocates KV cache on the specified device."""
+
         kv_cache_shape = self.attn_backend.get_kv_cache_shape(
             num_blocks, self.block_size, self.num_kv_heads, self.head_size)
+
+
         pin_memory = is_pin_memory_available() if device == "cpu" else False
-        kv_cache: List[torch.Tensor] = []
+        kv_caches: List[ShardedTensor] = []
         for _ in range(self.num_layers):
             # null block in CpuGpuBlockAllocator requires at least that
             # block to be zeroed-out.
             # We zero-out everything for simplicity.
-            kv_cache.append(
-                torch.zeros(kv_cache_shape,
-                            dtype=self.dtype,
-                            pin_memory=pin_memory,
-                            device=device))
-        return kv_cache
+            kv_cache = ShardedTensor(torch.zeros(kv_cache_shape,
+                        dtype=self.dtype,
+                        pin_memory=pin_memory,
+                        device=device).view(2, num_blocks, self.num_kv_heads, self.head_size, self.block_size), num_shards=NUM_SHARDS, shard_dim=2)
+
+            kv_caches.append(kv_cache)
+ 
+        return kv_caches
 
     def swap_in(self, src_to_dst: torch.Tensor) -> None:
         for i in range(self.num_layers):
