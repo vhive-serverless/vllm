@@ -791,6 +791,7 @@ class LLMEngine:
             stats = self._get_stats(scheduler_outputs)
             finished_tokens = sum(len(output.prompt_token_ids) + sum(len(output_tokens.token_ids)
                                   for output_tokens in output.outputs) for output in request_outputs if output.finished)
+            self.metrics.append(self._stats_to_metrics(stats, finished_tokens))
 
         if not request_outputs:
             # Stop the execute model loop in parallel workers until there are
