@@ -9,6 +9,7 @@ from vllm.logger import init_logger
 from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, is_pin_memory_available
 from liquid.worker import NUM_SHARDS
 from liquid.sharded_tensor import ShardedTensor
+from vllm.distributed.parallel_state import get_tensor_model_parallel_rank
 
 logger = init_logger(__name__)
 
@@ -34,7 +35,12 @@ class CacheEngine:
 
         self.head_size = model_config.get_head_size()
         self.num_layers = model_config.get_num_layers(parallel_config)
-        self.num_kv_heads = model_config.get_num_kv_heads(parallel_config)
+        # self.num_kv_heads = model_config.get_num_kv_heads(parallel_config)
+        rank = get_tensor_model_parallel_rank()
+        if rank == 0:
+            self.num_kv_heads = 9 
+        else:
+            self.num_kv_heads = 3
 
         self.block_size = cache_config.block_size
         self.num_gpu_blocks = cache_config.num_gpu_blocks
@@ -82,11 +88,17 @@ class CacheEngine:
             kv_cache = ShardedTensor(torch.zeros(kv_cache_shape,
                         dtype=self.dtype,
                         pin_memory=pin_memory,
-                        device=device).view(2, num_blocks, self.num_kv_heads, self.head_size, self.block_size), num_shards=NUM_SHARDS, shard_dim=2)
+                        device=device).view(2, num_blocks, self.num_kv_heads, self.head_size, self.block_size), num_shards=len(self.shard_ids), shard_dim=2)
 
             kv_caches.append(kv_cache)
  
         return kv_caches
+
+    def delete_shard(self, shard_id: int) -> None:
+        for cache in self.gpu_cache:
+            cache.delete_shard(shard_id) 
+        for cache in self.cpu_cache:
+            cache.delete_shard(shard_id)
 
     def swap_in(self, src_to_dst: torch.Tensor) -> None:
         for i in range(self.num_layers):

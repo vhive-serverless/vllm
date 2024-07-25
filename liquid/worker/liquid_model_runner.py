@@ -229,6 +229,9 @@ class LiquidModelRunner:
         block_size = self.block_size
         return (self.max_seq_len_to_capture + block_size - 1) // block_size
 
+    def delete_shard(self, shard_id: int) -> None:
+        self.model.delete_shard(shard_id)
+
     def _prepare_model_input(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],

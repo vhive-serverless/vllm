@@ -245,7 +245,7 @@ class ColumnParallelLinear(LinearBase):
                  output_sizes: Optional[List[int]] = None,
                  param_class = ShardedParameter,
                  num_shards: int = 1,
-                 shard_dim: int = 1,
+                 shard_dim: int = 0,
                  ):
         super().__init__(input_size, output_size, skip_bias_add, params_dtype,
                          quant_config)
@@ -254,7 +254,8 @@ class ColumnParallelLinear(LinearBase):
         self.gather_output = gather_output
 
         # Divide the weight matrix along the last dimension.
-        tp_size = get_tensor_model_parallel_world_size()
+        # tp_size = get_tensor_model_parallel_world_size()
+        tp_size = 1
         assert self.quant_method is not None
         self.output_size_per_partition = divide(self.output_size, tp_size)
         self.output_partition_sizes = [self.output_size_per_partition]
@@ -296,7 +297,8 @@ class ColumnParallelLinear(LinearBase):
         fp8_scales_shard_indexer = getattr(param, "fp8_scales_shard_indexer",
                                            None)
 
-        tp_rank = get_tensor_model_parallel_rank()
+        # tp_rank = get_tensor_model_parallel_rank()
+        tp_rank = 0
         output_dim = getattr(param, "output_dim", None)
         param_data = param.data
         if output_dim is not None:
@@ -325,7 +327,6 @@ class ColumnParallelLinear(LinearBase):
         else:
             output = output_parallel
         output_bias = self.bias if self.skip_bias_add else None
-        output = ShardedTensor(data=output, num_shards=self.num_shards,shard_dim=self.shard_dim)
         return output, output_bias
 
     def extra_repr(self) -> str:
@@ -537,7 +538,7 @@ class QKVParallelLinear(ColumnParallelLinear):
                  params_dtype: Optional[torch.dtype] = None,
                  quant_config: Optional[QuantizationConfig] = None,
                  num_shards: int = 1,
-                 shard_dim: int = 1,
+                 shard_dim: int = 0,
                  ):
         self.num_shards = num_shards
         self.shard_dim = shard_dim
@@ -548,7 +549,8 @@ class QKVParallelLinear(ColumnParallelLinear):
             total_num_kv_heads = total_num_heads
         self.total_num_kv_heads = total_num_kv_heads
         # Divide the weight matrix along the last dimension.
-        tp_size = get_tensor_model_parallel_world_size()
+        # tp_size = get_tensor_model_parallel_world_size()
+        tp_size = 1
         self.num_heads = divide(self.total_num_heads, tp_size)
         if tp_size >= self.total_num_kv_heads:
             self.num_kv_heads = 1
@@ -578,9 +580,9 @@ class QKVParallelLinear(ColumnParallelLinear):
                          shard_dim=shard_dim,
                          )
 
-    def forward(self, input_) -> QKVShardedTensor:
-        output, bias = super().forward(input_)
-        return QKVShardedTensor(data=output, num_shards=self.num_shards,shard_dim=self.shard_dim), bias 
+    # def forward(self, input_) -> QKVShardedTensor:
+    #     output, bias = super().forward(input_)
+    #     return QKVShardedTensor(data=output, num_shards=self.num_shards,shard_dim=self.shard_dim), bias 
 
     def weight_loader(self,
                       param: Parameter,
@@ -646,7 +648,8 @@ class QKVParallelLinear(ColumnParallelLinear):
                 self.weight_loader(param, loaded_weight_shard, shard_id)
             return
 
-        tp_rank = get_tensor_model_parallel_rank()
+        # tp_rank = get_tensor_model_parallel_rank()
+        tp_rank = 0
         assert loaded_shard_id in ["q", "k", "v"]
 
         # If output dim is defined, use the default loading process.
@@ -783,7 +786,9 @@ class RowParallelLinear(LinearBase):
 
         # Divide the weight matrix along the last dimension.
         self.tp_size = get_tensor_model_parallel_world_size()
-        self.input_size_per_partition = divide(input_size, self.tp_size)
+        # self.input_size_per_partition = divide(input_size, self.tp_size)
+        # TODO: should use shard_ids to determine input_size_per_partition
+        self.input_size_per_partition = input_size
         assert self.quant_method is not None
         self.quant_method.create_weights(
             layer=self,
@@ -815,7 +820,8 @@ class RowParallelLinear(LinearBase):
         fp8_scales_shard_indexer = getattr(param, "fp8_scales_shard_indexer",
                                            None)
 
-        tp_rank = get_tensor_model_parallel_rank()
+        # tp_rank = get_tensor_model_parallel_rank()
+        tp_rank = 0
         input_dim = getattr(param, "input_dim", None)
         param_data = param.data
         if input_dim is not None:

@@ -1,10 +1,11 @@
 from sharded_parameter import ShardedParameter
 from sharded_tensor import ShardedTensor
 import torch
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from liquid.utils import get_gpu_memory_usage
 
-def get_gpu_memory_usage():
-    torch.cuda.synchronize()
-    return torch.cuda.memory_allocated() / 1024**3
 
 # Main script for testing
 if __name__ == "__main__":
@@ -24,15 +25,15 @@ if __name__ == "__main__":
     memory_usage = get_gpu_memory_usage()
     print(f"initial_memory_usage: {memory_usage:.3f} GB")
     # # Create a ShardedParameter instance
-    sharded_param = ShardedTensor(data=data, num_shards=num_shards, shard_dim=1)
+    sharded_param = ShardedParameter(data=data, num_shards=num_shards, shard_dim=1)
     # clone_data = data.clone()
 
 
     del data
 
     # Delete shard 1 (second shard, full of 1) and shard 3 (fourth shard, full of 3)
-    sharded_param.delete_shard(1)
-    sharded_param.delete_shard(3)  
+    sharded_param.delete_shard(0)
+    sharded_param.delete_shard(1)  
 
     # Get the second shard 
     remaining_shard = sharded_param.get_shard(2)

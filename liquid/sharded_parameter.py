@@ -50,7 +50,7 @@ class ShardedParameter(Parameter):
         start_index = index * self.shard_size
         # Create views of the tensor parts before and after the shard
         before_shard = tensor.narrow(self.shard_dim, 0, start_index)
-        after_shard = tensor.narrow(self.shard_dim, start_index + self.shard_size, self.size(self.shard_dim) - start_index - self.shard_size)
+        after_shard = tensor.narrow(self.shard_dim, start_index + self.shard_size, tensor.size(self.shard_dim) - start_index - self.shard_size)
 
         # Concatenate the views to form a new tensor
         new_data = torch.cat([before_shard, after_shard], dim=self.shard_dim)
@@ -102,6 +102,7 @@ class QKVShardedParameter(ShardedParameter):
                  shard_ids : Optional[List[int]] = None
                  ):
         super().__init__(data, num_shards, shard_dim, shard_ids)
+        self.shard_size = self.shard_size // 3
         assert self.size(shard_dim) % 3 == 0, f"QKV parameter must have a length divisible by 3 along dim: {shard_dim}"
         qkv_shard_size = self.size(shard_dim) // 3
         self.q_data = self.narrow(shard_dim, 0, qkv_shard_size)
@@ -117,11 +118,11 @@ class QKVShardedParameter(ShardedParameter):
         return Parameter(shard)
 
     def delete_shard(self, shard_id: int) -> None:
-        new_q_data = self._delete_shard(self.q_data, shard_id)
-        new_k_data = self._delete_shard(self.k_data, shard_id)
-        new_v_data = self._delete_shard(self.v_data, shard_id)
+        self.q_data = self._delete_shard(self.q_data, shard_id)
+        self.k_data = self._delete_shard(self.k_data, shard_id)
+        self.v_data = self._delete_shard(self.v_data, shard_id)
 
-        new_data = torch.cat([new_q_data, new_k_data, new_v_data], dim=self.shard_dim)
+        new_data = torch.cat([self.q_data, self.k_data, self.v_data], dim=self.shard_dim)
         self.data = new_data
 
         index = self.shard_ids.index(shard_id)
@@ -140,11 +141,11 @@ class QKVShardedParameter(ShardedParameter):
         appended_k_data = shard_data.narrow(self.shard_dim, qkv_shard_size, qkv_shard_size)
         appended_v_data = shard_data.narrow(self.shard_dim, 2*qkv_shard_size, qkv_shard_size)
 
-        new_q_data = self._append_shard(self.q_data, appended_q_data)
-        new_k_data = self._append_shard(self.k_data, appended_k_data)
-        new_v_data = self._append_shard(self.v_data, appended_v_data)
+        self.q_data = self._append_shard(self.q_data, appended_q_data)
+        self.k_data = self._append_shard(self.k_data, appended_k_data)
+        self.v_data = self._append_shard(self.v_data, appended_v_data)
 
-        self.data = torch.cat([new_q_data, new_k_data, new_v_data], dim=self.shard_dim)
+        self.data = torch.cat([self.q_data, self.k_data, self.v_data], dim=self.shard_dim)
 
         self.shard_ids.append(shard_id) 
 

@@ -93,6 +93,9 @@ class Attention(nn.Module):
         return self.impl.forward(query, key, value, kv_cache, attn_metadata,
                                  self._kv_scale)
 
+    def delete_one_shard(self) -> None:
+        return self.impl.delete_one_shard()
+
     def extra_repr(self) -> str:
         s = f"head_size={self.impl.head_size}"  # type: ignore
         s += f", num_heads={self.impl.num_heads}"  # type: ignore

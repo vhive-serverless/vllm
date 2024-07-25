@@ -14,6 +14,7 @@ from liquid.attention.ops.paged_attn import (PagedAttention,
                                            PagedAttentionMetadata)
 from vllm.logger import init_logger
 from liquid.sharded_tensor import ShardedTensor
+from liquid.worker import NUM_SHARDS
 
 logger = init_logger(__name__)
 
@@ -230,11 +231,19 @@ class XFormersImpl(AttentionImpl[LiquidMetadata]):
         assert self.num_heads % self.num_kv_heads == 0
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
 
+        self.heads_per_shard = self.num_heads // NUM_SHARDS
+        self.kv_heads_per_shard = self.num_kv_heads // NUM_SHARDS
+
         suppored_head_sizes = PagedAttention.get_supported_head_sizes()
         if head_size not in suppored_head_sizes:
             raise ValueError(
                 f"Head size {head_size} is not supported by PagedAttention. "
                 f"Supported head sizes are: {suppored_head_sizes}.")
+
+    def delete_one_shard(self) -> None:
+        self.num_heads -= self.heads_per_shard
+
+        self.num_kv_heads -= self.kv_heads_per_shard
 
     def forward(
         self,
@@ -256,9 +265,9 @@ class XFormersImpl(AttentionImpl[LiquidMetadata]):
         Returns:
             shape = [num_tokens, num_heads * head_size]
         """
-        query = query.view(-1, self.num_heads, self.head_size)
-        key = key.view(-1, self.num_kv_heads, self.head_size)
-        value = value.view(-1, self.num_kv_heads, self.head_size)
+        query = query.contiguous().view(-1, self.num_heads, self.head_size)
+        key = key.contiguous().view(-1, self.num_kv_heads, self.head_size)
+        value = value.contiguous().view(-1, self.num_kv_heads, self.head_size)
 
         if kv_cache is not None:
             key_cache, value_cache = PagedAttention.split_kv_cache(

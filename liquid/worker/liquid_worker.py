@@ -1,7 +1,7 @@
 """A GPU worker class."""
 import gc
 import os
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union, Generator
 
 import torch
 import torch.distributed
@@ -283,6 +283,20 @@ class Worker(WorkerBase):
         # Worker only supports single-step execution. Wrap the output in a list
         # to conform to interface.
         return [output]
+
+    def get_shard(self, shard_id: int) -> Tuple[Dict[str, torch.Tensor], List[torch.Tensor]]:
+        pass
+
+    def get_sharded_weights_iterator(self, shard_id: int) -> Generator[Tuple[str, torch.Tensor], None, None]:
+        return self.model_runner.model.get_sharded_weights_iterator(shard_id)
+
+    def delete_shard(self, shard_id: int) -> None:
+        self.model_runner.delete_shard(shard_id)
+        if hasattr(self, "cahceh_engine"):
+            self.cache_engine.delete_shard(shard_id)
+
+        index = self.shard_ids.index(shard_id)
+        self.shard_ids.pop(index)
 
     @torch.inference_mode()
     def start_worker_execution_loop(self) -> None:

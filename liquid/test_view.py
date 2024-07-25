@@ -1,10 +1,10 @@
 from sharded_parameter import ShardedParameter
 from sharded_tensor import ShardedTensor
 import torch
-
-def get_gpu_memory_usage():
-    torch.cuda.synchronize()
-    return torch.cuda.memory_allocated() / 1024**3
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from liquid.utils import get_gpu_memory_usage
 
 # Main script for testing
 if __name__ == "__main__":

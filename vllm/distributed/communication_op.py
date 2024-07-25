@@ -147,7 +147,10 @@ def tensor_model_parallel_gather(input_: torch.Tensor,
         dim += input_.dim()
     # Allocate output tensor.
     if get_tensor_model_parallel_rank() == dst:
-        gather_list = [torch.empty_like(input_) for _ in range(world_size)]
+        # gather_list = [torch.empty_like(input_) for _ in range(world_size)]
+        gather_list = []
+        gather_list.append(torch.empty_like(input_))
+        gather_list.append(torch.empty(input_.shape[0], input_.shape[1] // 3, dtype=input_.dtype, device=input_.device))
     else:
         gather_list = None
     # Gather.
@@ -160,6 +163,41 @@ def tensor_model_parallel_gather(input_: torch.Tensor,
     else:
         output_tensor = None
     return output_tensor
+
+def gather_and_concat(input_, dst=0, dim=-1):
+    rank = get_tensor_model_parallel_rank()
+    world_size = get_tensor_model_parallel_world_size()
+    
+    # Step 1: Collect input sizes on dst rank
+    # local_size = torch.tensor(input_.size(dim), dtype=torch.int64).cuda()
+    local_size = torch.zeros(1, dtype=torch.int64).cuda()
+    local_size[0] = input_.size(dim)
+    all_sizes = [torch.zeros(1, dtype=torch.int64).cuda() for _ in range(world_size)]
+    torch.distributed.all_gather(all_sizes, local_size, group=get_tensor_model_parallel_group())
+    all_sizes = [size.item() for size in all_sizes]
+
+    # Step 2: Find the largest size and pad all tensors to the max size
+    max_size = max(all_sizes)
+    pad_shape = list(input_.size())
+    pad_shape[dim] = max_size - input_.size(dim)
+    padding = torch.zeros(*pad_shape).cuda()
+    padded_input = torch.cat([input_, padding], dim=dim)
+    
+    # Step 3: Allocate a gather list with the max size tensors on dst rank
+    if rank == dst:
+        gather_list = [torch.zeros_like(padded_input) for _ in range(world_size)]
+    else:
+        gather_list = None
+
+    # Step 4: Perform all_gather to collect tensors
+    torch.distributed.gather(padded_input, gather_list, dst=dst, group=get_tensor_model_parallel_group())
+
+    # Step 5: Retrieve the original tensors and delete the padded tensors
+    if rank == dst:
+        gathered_tensors = [t.narrow(dim, 0, size) for t, size in zip(gather_list, all_sizes)]
+        return torch.cat(gathered_tensors, dim=dim)
+    else:
+        return None
 
 
 def broadcast(input_: torch.Tensor,

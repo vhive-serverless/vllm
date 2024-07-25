@@ -17,7 +17,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only OPT model compatible with HuggingFace weights."""
-from typing import Iterable, List, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple, Generator
 
 import torch
 from torch import nn
@@ -75,7 +75,8 @@ class OPTAttention(nn.Module):
             get_tensor_model_parallel_world_size())
         total_num_heads = num_heads
         assert num_heads % tensor_model_parallel_world_size == 0
-        self.num_heads = total_num_heads // tensor_model_parallel_world_size
+        # self.num_heads = total_num_heads // tensor_model_parallel_world_size
+        self.num_heads = total_num_heads
         self.head_dim = embed_dim // total_num_heads
         self.scaling = self.head_dim**-0.5
 
@@ -215,6 +216,7 @@ class OPTDecoder(nn.Module):
         self.embed_tokens = VocabParallelEmbedding(
             config.vocab_size,
             config.word_embed_proj_dim,
+            num_shards=NUM_SHARDS,
         )
         # Positional embeddings are replicated (not sharded).
         self.embed_positions = OPTLearnedPositionalEmbedding(
@@ -377,9 +379,16 @@ class OPTForCausalLM(nn.Module):
                                         default_weight_loader)
                 weight_loader(param, loaded_weight)
 
-    def get_sharded_state_dict(self) -> Dict[str, torch.Tensor]:
-        state_dict = {}
+
+    def delete_shard(self, shard_id: int) -> None:
         for name, param in self.named_parameters():
             if hasattr(param, "num_shards"):
-                state_dict[name] = param  
-        return state_dict
+                param.delete_shard(shard_id)
+
+        for layer in self.model.decoder.layers:
+            layer.self_attn.attn.delete_one_shard()
+
+    def get_sharded_weights_iterator(self, shard_id: int) -> Generator[Tuple[str, torch.Tensor], None, None]:
+        for name, param in self.named_parameters():
+            if hasattr(param, "num_shards"):
+                yield name, param.get_shard(shard_id)
