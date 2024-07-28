@@ -39,6 +39,7 @@ class GPUExecutor(ExecutorBase):
             device_config=self.device_config,
             cache_config=self.cache_config,
             load_config=self.load_config,
+            liquid_config=self.liquid_config,
             local_rank=local_rank,
             rank=rank,
             distributed_init_method=distributed_init_method,

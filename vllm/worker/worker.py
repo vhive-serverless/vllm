@@ -8,7 +8,7 @@ import torch.distributed
 
 from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
                          ModelConfig, ParallelConfig, SchedulerConfig,
-                         SpeculativeConfig, VisionLanguageConfig)
+                         SpeculativeConfig, VisionLanguageConfig, LiquidConfig)
 from vllm.distributed import (broadcast_tensor_dict,
                               ensure_model_parallel_initialized,
                               init_distributed_environment,
@@ -38,6 +38,7 @@ class Worker(WorkerBase):
         device_config: DeviceConfig,
         cache_config: CacheConfig,
         load_config: LoadConfig,
+        liquid_config: Optional[LiquidConfig],
         local_rank: int,
         rank: int,
         distributed_init_method: str,
@@ -51,6 +52,7 @@ class Worker(WorkerBase):
         self.scheduler_config = scheduler_config
         self.device_config = device_config
         self.cache_config = cache_config
+        self.liquid_config = liquid_config
         self.local_rank = local_rank
         self.rank = rank
         self.distributed_init_method = distributed_init_method

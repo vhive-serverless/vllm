@@ -145,10 +145,11 @@ class ProcessWorkerWrapper:
     for handling single-node multi-GPU tensor parallel."""
 
     def __init__(self, result_handler: ResultHandler,
-                 worker_factory: Callable[[], Any]) -> None:
+                 worker_factory: Callable[[], Any], is_active: bool=True) -> None:
         self._task_queue = mp.Queue()
         self.result_queue = result_handler.result_queue
         self.tasks = result_handler.tasks
+        self.is_active = is_active
         self.process: BaseProcess = mp.Process(  # type: ignore[attr-defined]
             target=_run_worker_process,
             name="VllmWorkerProcess",

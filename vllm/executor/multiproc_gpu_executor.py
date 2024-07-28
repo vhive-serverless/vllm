@@ -40,10 +40,16 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         distributed_init_method = get_distributed_init_method(
             get_ip(), get_open_port())
 
-        if world_size == 1:
+        if world_size == 1 and self.liquid_config is None:
             self.workers = []
             self.worker_monitor = None
         else:
+            if self.liquid_config is None:
+                worker_num = world_size
+                non_driver_active = True
+            else:
+                worker_num = len(self.liquid_config.liquid_gpu_range)
+                non_driver_active = False
             result_handler = ResultHandler()
             self.workers = [
                 ProcessWorkerWrapper(
@@ -53,7 +59,9 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
                         rank=rank,
                         local_rank=rank,
                         distributed_init_method=distributed_init_method,
-                    )) for rank in range(1, world_size)
+                    ),
+                    is_active=non_driver_active
+                    ) for rank in range(1, worker_num)
             ]
 
             self.worker_monitor = WorkerMonitor(self.workers, result_handler)
@@ -65,7 +73,9 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         self._run_workers("init_device")
         self._run_workers("load_model",
                           max_concurrent_workers=self.parallel_config.
-                          max_parallel_loading_workers)
+                          max_parallel_loading_workers,
+                          only_active_workers=True,
+                          )
 
     def shutdown(self):
         if (worker_monitor := getattr(self, "worker_monitor",
@@ -90,6 +100,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         *args,
         async_run_remote_workers_only: bool = False,
         max_concurrent_workers: Optional[int] = None,
+        only_active_workers: bool = False,
         **kwargs,
     ) -> Any:
         """Runs the given method on all workers.
@@ -101,6 +112,14 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
                 blocking on the results.
         """
 
+        if only_active_workers:
+            workers = []
+            for worker in self.workers:
+                if worker.is_active:
+                    workers.append(worker)
+        else:
+            workers = self.workers
+
         if max_concurrent_workers:
             raise NotImplementedError(
                 "max_concurrent_workers is not supported yet.")
@@ -108,7 +127,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         # Start the workers first.
         worker_outputs = [
             worker.execute_method(method, *args, **kwargs)
-            for worker in self.workers
+            for worker in workers
         ]
 
         if async_run_remote_workers_only:
