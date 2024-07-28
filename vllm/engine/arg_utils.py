@@ -8,7 +8,7 @@ from typing import List, Optional, Tuple, Union
 from vllm.config import (CacheConfig, DecodingConfig, DeviceConfig,
                          EngineConfig, LoadConfig, LoRAConfig, ModelConfig,
                          ParallelConfig, SchedulerConfig, SpeculativeConfig,
-                         TokenizerPoolConfig, VisionLanguageConfig)
+                         TokenizerPoolConfig, VisionLanguageConfig, LiquidConfig)
 from vllm.model_executor.layers.quantization import QUANTIZATION_METHODS
 from vllm.utils import str_to_int_tuple
 
@@ -100,6 +100,12 @@ class EngineArgs:
     ngram_prompt_lookup_min: Optional[int] = None
 
     qlora_adapter_name_or_path: Optional[str] = None
+
+    # liquid related parameters
+    liquid_gpu_range: Optional[List[int]] = None
+    liquid_gpu_space: Optional[int] = None
+    liquid_driver_gpu_id: int = 0
+    liquid_total_num_shards : Optional[int] = None
 
     def __post_init__(self):
         if self.tokenizer is None:
@@ -762,7 +768,10 @@ class EngineArgs:
             raise ValueError(
                 "Chunked prefill is not supported with sliding window. "
                 "Set --disable-sliding-window to disable sliding window.")
-
+        if self.liquid_gpu_range is None or self.liquid_gpu_space is None or self.liquid_total_num_shards is None:
+            liquid_config = None
+        else:
+            liquid_config = LiquidConfig(liquid_gpu_range=self.liquid_gpu_range, liquid_gpu_space=self.liquid_gpu_space, liquid_driver_gpu_id=self.liquid_driver_gpu_id, liquid_total_num_shards=self.liquid_total_num_shards)
         return EngineConfig(model_config=model_config,
                             cache_config=cache_config,
                             parallel_config=parallel_config,
@@ -772,7 +781,9 @@ class EngineArgs:
                             vision_language_config=vision_language_config,
                             speculative_config=speculative_config,
                             load_config=load_config,
-                            decoding_config=decoding_config)
+                            decoding_config=decoding_config,
+                            liquid_config=liquid_config,
+                            )
 
 
 @dataclass

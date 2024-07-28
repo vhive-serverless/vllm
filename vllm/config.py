@@ -1351,6 +1351,13 @@ class DecodingConfig:
             raise ValueError(f"Invalid guided_decoding_backend '{backend},"
                              f"must be one of {valid_guided_backends}")
 
+@dataclass
+class LiquidConfig:
+    "Liquid related config"
+    liquid_gpu_range: List[int]
+    liquid_gpu_space: int
+    liquid_driver_gpu_id: int
+    liquid_total_num_shards: int
 
 @dataclass(frozen=True)
 class EngineConfig:
@@ -1368,6 +1375,7 @@ class EngineConfig:
     vision_language_config: Optional[VisionLanguageConfig]
     speculative_config: Optional[SpeculativeConfig]
     decoding_config: Optional[DecodingConfig]
+    liquid_config: Optional[LiquidConfig]
 
     def __post_init__(self):
         """Verify configs are valid & consistent with each other.

@@ -53,6 +53,62 @@ _PP_GLOBAL_RANKS: Optional[List[int]] = None
 
 _LOCAL_RANK = -1
 
+ACTIVE_GROUP_MANAGER = None
+
+class ActiveGroupManager:
+    def __init__(self, world_size: int, backend: str) -> None:
+        self._TP_DEVICE_GROUP: Optional[ProcessGroup] = None
+        self._TP_CPU_GROUP: Optional[ProcessGroup] = None
+        self._TP_PYNCCL_COMMUNICATOR = None
+        self._TP_CA_COMMUNICATOR = None
+
+        self._DEVICE_WORLD_GROUP = None
+        self._CPU_WORLD_GROUP = None
+
+        self.world_size = world_size
+        self.backend = backend
+        self.active_ranks = []
+        for i in range(self.world_size):
+            self.active_ranks.append(i)
+
+    def update_active_ranks(self, active_ranks: List[int]):
+        # update the active ranks and create groups
+        self.active_ranks = active_ranks
+        self.destroy_model_parallel()
+
+        self._TP_DEVICE_GROUP = torch.distributed.new_group(ranks=active_ranks, backend=self.backend)
+        self._TP_CPU_GROUP = torch.distributed.new_group(ranks=active_ranks, backend=self.backend) 
+
+    
+        from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
+        self._TP_PYNCCL_COMMUNICATOR = PyNcclCommunicator(
+            group=self._TP_DEVICE_GROUP,
+            device=_LOCAL_RANK,
+        )
+
+        # Initialize a custom fast all-reduce implementation.
+        if _ENABLE_CUSTOM_ALL_REDUCE:
+            from vllm.distributed.device_communicators.custom_all_reduce import (
+                CustomAllreduce)
+            self._TP_CA_COMMUNICATOR = CustomAllreduce(
+                group=self._TP_CPU_GROUP,
+                device=_LOCAL_RANK,
+            )
+
+
+
+    def destroy_model_parallel(self):
+        if self._TP_DEVICE_GROUP:
+            torch.distributed.destroy_process_group(self._TP_DEVICE_GROUP)
+        self._TP_DEVICE_GROUP = None
+        if self._TP_CPU_GROUP:
+            torch.distributed.destroy_process_group(self._TP_CPU_GROUP)
+        self._TP_CPU_GROUP = None
+        self._TP_PYNCCL_COMMUNICATOR = None
+        self._TP_CA_COMMUNICATOR = None
+
+        
+
 
 def set_custom_all_reduce(enable: bool):
     global _ENABLE_CUSTOM_ALL_REDUCE
@@ -65,13 +121,15 @@ def get_pp_pynccl_communicator():
 
 
 def get_tp_pynccl_communicator():
-    global _TP_PYNCCL_COMMUNICATOR
-    return _TP_PYNCCL_COMMUNICATOR
+    # global _TP_PYNCCL_COMMUNICATOR
+    if ACTIVE_GROUP_MANAGER:
+        return ACTIVE_GROUP_MANAGER._TP_PYNCCL_COMMUNICATOR
 
 
 def get_tp_ca_communicator():
-    global _TP_CA_COMMUNICATOR
-    return _TP_CA_COMMUNICATOR
+    # global _TP_CA_COMMUNICATOR
+    if ACTIVE_GROUP_MANAGER:
+        return ACTIVE_GROUP_MANAGER._TP_CA_COMMUNICATOR
 
 
 def get_local_rank():

@@ -10,7 +10,7 @@ import vllm
 from vllm.config import (CacheConfig, DecodingConfig, DeviceConfig, LoadConfig,
                          LoRAConfig, ModelConfig, ParallelConfig,
                          SchedulerConfig, SpeculativeConfig,
-                         VisionLanguageConfig)
+                         VisionLanguageConfig, LiquidConfig)
 from vllm.core.scheduler import (ScheduledSequenceGroup, Scheduler,
                                  SchedulerOutputs)
 from vllm.engine.arg_utils import EngineArgs
@@ -154,6 +154,7 @@ class LLMEngine:
         vision_language_config: Optional[VisionLanguageConfig],
         speculative_config: Optional[SpeculativeConfig],
         decoding_config: Optional[DecodingConfig],
+        liquid_config: Optional[LiquidConfig],
         executor_class: Type[ExecutorBase],
         log_stats: bool,
         usage_context: UsageContext = UsageContext.ENGINE_CONTEXT,
@@ -210,6 +211,7 @@ class LLMEngine:
         self.decoding_config = decoding_config or DecodingConfig()
         self.metrics_record = metrics_record
         self.log_stats = log_stats
+        self.liquid_config = liquid_config
 
         if not self.model_config.skip_tokenizer_init:
             self.tokenizer = self._init_tokenizer()
@@ -232,6 +234,7 @@ class LLMEngine:
             vision_language_config=vision_language_config,
             speculative_config=speculative_config,
             load_config=load_config,
+            liquid_config=liquid_config,
         )
 
         if not self.model_config.embedding_mode:
