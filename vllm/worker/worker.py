@@ -119,9 +119,11 @@ class Worker(WorkerBase):
             raise RuntimeError(
                 f"Not support device type: {self.device_config.device}")
         # Initialize the distributed environment.
-        init_worker_distributed_environment(self.parallel_config, self.rank,
+        world_size = self.parallel_config.world_size if self.liquid_config is None else len(self.liquid_config.liquid_gpu_range)
+        init_worker_distributed_environment(world_size, self.parallel_config, self.rank,
                                             self.distributed_init_method,
                                             self.local_rank,
+                                            self.liquid_config,
                                             )
         # Set random seed.
         set_random_seed(self.model_config.seed)
@@ -365,19 +367,22 @@ class Worker(WorkerBase):
 
 
 def init_worker_distributed_environment(
+    world_size: int,
     parallel_config: ParallelConfig,
     rank: int,
     distributed_init_method: Optional[str] = None,
     local_rank: int = -1,
+    liquid_config: Optional[LiquidConfig] = None
 ) -> None:
     """Initialize the distributed environment."""
     set_custom_all_reduce(not parallel_config.disable_custom_all_reduce)
 
-    init_distributed_environment(parallel_config.world_size, rank,
+    init_distributed_environment(world_size, rank,
                                  distributed_init_method, local_rank)
-    ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
-                                      parallel_config.pipeline_parallel_size,
-                                      )
+    if liquid_config is None:
+        ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
+                                        parallel_config.pipeline_parallel_size,
+                                        )
     
 
 def _check_if_gpu_supports_dtype(torch_dtype: torch.dtype):
