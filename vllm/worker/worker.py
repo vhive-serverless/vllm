@@ -12,7 +12,11 @@ from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
 from vllm.distributed import (broadcast_tensor_dict,
                               ensure_model_parallel_initialized,
                               init_distributed_environment,
-                              set_custom_all_reduce)
+                              set_custom_all_reduce,
+                              update_active_ranks,
+                              )
+from vllm.distributed.parallel_state import (get_tensor_model_parallel_group,
+                                             get_tensor_model_parallel_cpu_group)
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
 from vllm.sequence import ExecuteModelRequest, PoolerOutput, SamplerOutput
@@ -59,6 +63,8 @@ class Worker(WorkerBase):
         self.lora_config = lora_config
         self.load_config = load_config
         self.is_driver_worker = is_driver_worker
+        if self.liquid_config is not None:
+            self.active_ranks = [0]
         if self.is_driver_worker:
             assert self.rank == 0, "The driver worker must have rank 0."
 
@@ -115,9 +121,15 @@ class Worker(WorkerBase):
         # Initialize the distributed environment.
         init_worker_distributed_environment(self.parallel_config, self.rank,
                                             self.distributed_init_method,
-                                            self.local_rank)
+                                            self.local_rank,
+                                            )
         # Set random seed.
         set_random_seed(self.model_config.seed)
+
+    def update_active_ranks(self, active_ranks: List[int]):
+        self.active_ranks = active_ranks
+        if self.rank in active_ranks:
+            update_active_ranks(self.active_ranks)
 
     def load_model(self):
         self.model_runner.load_model()
@@ -277,7 +289,9 @@ class Worker(WorkerBase):
             "blocks_to_swap_out": blocks_to_swap_out,
             "blocks_to_copy": blocks_to_copy,
         }
-        broadcast_tensor_dict(data, src=0)
+        group = get_tensor_model_parallel_group()
+        metadata_group = get_tensor_model_parallel_cpu_group()
+        broadcast_tensor_dict(data, src=0, group=group, metadata_group=metadata_group)
 
         self.cache_swap(blocks_to_swap_in, blocks_to_swap_out, blocks_to_copy)
 
@@ -361,10 +375,10 @@ def init_worker_distributed_environment(
 
     init_distributed_environment(parallel_config.world_size, rank,
                                  distributed_init_method, local_rank)
-
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
-                                      parallel_config.pipeline_parallel_size)
-
+                                      parallel_config.pipeline_parallel_size,
+                                      )
+    
 
 def _check_if_gpu_supports_dtype(torch_dtype: torch.dtype):
     # Check if the GPU supports the dtype.

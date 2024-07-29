@@ -35,7 +35,7 @@ class DistributedGPUExecutor(GPUExecutor):
             - tuple[num_gpu_blocks, num_cpu_blocks]
         """
         # Get the maximum number of blocks that can be allocated on GPU and CPU.
-        num_blocks = self._run_workers("determine_num_available_blocks", )
+        num_blocks = self._run_workers("determine_num_available_blocks", only_active_workers=True)
 
         # Since we use a shared centralized controller, we take the minimum
         # number of blocks across all workers to make sure all the memory
@@ -70,6 +70,7 @@ class DistributedGPUExecutor(GPUExecutor):
             self.parallel_worker_tasks = self._run_workers(
                 "start_worker_execution_loop",
                 async_run_remote_workers_only=True,
+                only_active_workers=True,
                 **self.extra_execute_model_run_workers_kwargs)
 
         # Only the driver worker returns the sampling results.

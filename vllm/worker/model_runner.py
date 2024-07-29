@@ -13,7 +13,7 @@ from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
                          ModelConfig, ParallelConfig, SchedulerConfig,
                          VisionLanguageConfig)
 from vllm.distributed import broadcast_tensor_dict
-from vllm.distributed.communication_op import graph_capture
+from vllm.distributed.communication_op import graph_capture, get_tensor_model_parallel_group, get_tensor_model_parallel_cpu_group
 from vllm.logger import init_logger
 from vllm.lora.layers import LoRAMapping
 from vllm.lora.request import LoRARequest
@@ -701,9 +701,13 @@ class ModelRunner:
             }
             if attn_metadata:
                 metadata_dict.update(attn_metadata.asdict_zerocopy())
-            broadcast_tensor_dict(metadata_dict, src=0)
+            group = get_tensor_model_parallel_group()
+            metadata_group = get_tensor_model_parallel_cpu_group()
+            broadcast_tensor_dict(metadata_dict, src=0, group=group, metadata_group=metadata_group)
         else:
-            metadata_dict = broadcast_tensor_dict(src=0)
+            group = get_tensor_model_parallel_group()
+            metadata_group = get_tensor_model_parallel_cpu_group()
+            metadata_dict = broadcast_tensor_dict(src=0, group=group, metadata_group=metadata_group)
             input_tokens = metadata_dict.pop("input_tokens")
             input_positions = metadata_dict.pop("input_positions")
             selected_token_indices = metadata_dict.pop(
