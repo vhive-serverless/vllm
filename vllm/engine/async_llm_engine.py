@@ -220,6 +220,7 @@ class _AsyncLLMEngine(LLMEngine):
         and updates the scheduler with the model outputs. Finally, it decodes
         the sequences and returns the newly generated results.
         """
+        self.check_liquid_request_and_complete()
         seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
 
         if not scheduler_outputs.is_empty():
@@ -428,6 +429,9 @@ class AsyncLLMEngine:
         self.set_errored(exc)
         self._request_tracker.propagate_exception(exc)
 
+    def do_liquid(self, shard_ids: List[int], src: int, dst: int ):
+        self.engine.do_liquid(shard_ids, src, dst)
+
     async def get_tokenizer(self) -> "PreTrainedTokenizer":
         if self.engine_use_ray:
             return await self.engine.get_tokenizer.remote()  # type: ignore
@@ -473,7 +477,6 @@ class AsyncLLMEngine:
         """Kick the engine to process the waiting requests.
 
         Returns True if there are in-progress requests."""
-
         new_requests, finished_requests = (
             self._request_tracker.get_new_and_finished_requests())
 

@@ -27,10 +27,10 @@ async def main():
     for request_id in range(request_num):
         results_generators.append(async_engine.generate(f"What is LLM?", sampling_params=sampling_params, request_id=f"{request_id}"))
 
-    # shard_id = [2,3]
+    # shard_ids = [2,3]
     # src = 0
     # dst = 1
-    # async_engine.do_liquid(shard_id, src, dst)
+    # async_engine.do_liquid(shard_ids, src, dst)
 
     for results_generator in results_generators:
         final_output = None

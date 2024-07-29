@@ -772,6 +772,8 @@ class EngineArgs:
             liquid_config = None
         else:
             liquid_config = LiquidConfig(liquid_gpu_range=self.liquid_gpu_range, liquid_gpu_space=self.liquid_gpu_space, liquid_driver_gpu_id=self.liquid_driver_gpu_id, liquid_total_num_shards=self.liquid_total_num_shards)
+            # liquid currently only supports mp backend
+            parallel_config.distributed_executor_backend = "mp"
         return EngineConfig(model_config=model_config,
                             cache_config=cache_config,
                             parallel_config=parallel_config,

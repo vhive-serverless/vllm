@@ -11,6 +11,7 @@ from vllm.logger import init_logger
 from vllm.sequence import ExecuteModelRequest, SamplerOutput
 from vllm.utils import (get_distributed_init_method, get_ip, get_open_port,
                         get_vllm_instance_id, make_async)
+from vllm.liquid.request import LiquidRequest, LiquidOutput
 
 logger = init_logger(__name__)
 
@@ -20,7 +21,10 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
 
     def _init_executor(self) -> None:
         # Create the parallel GPU workers.
-        world_size = self.parallel_config.tensor_parallel_size
+        if self.liquid_config is None:
+            world_size = self.parallel_config.tensor_parallel_size
+        else:
+            world_size = len(self.liquid_config.liquid_gpu_range)
 
         # Set CUDA_VISIBLE_DEVICES for the driver, inherited by workers
         if "CUDA_VISIBLE_DEVICES" not in os.environ:
@@ -78,6 +82,33 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
                           max_parallel_loading_workers,
                           only_active_workers=True,
                           )
+    def get_active_ranks(self) -> List[int]:
+        active_ranks = [0]
+        for i, worker in enumerate(self.workers):
+            if worker.is_active:
+                rank = i+1
+                active_ranks.append(rank)
+        return active_ranks
+
+    def do_liquid(self, liquid_request: LiquidRequest) -> LiquidOutput:
+        shard_ids = liquid_request.shard_ids
+        src = liquid_request.src
+        dst = liquid_request.dst
+        liquid_output = LiquidOutput(shard_ids, src, dst)
+        # check if the src is active
+        active_ranks = self.get_active_ranks()
+        assert dst > 0 and dst < len(self.workers)+1, f"liquid dst: {dst} should be in the range between 1 and {len(self.workers)+1}"
+        assert src in active_ranks, f"liquid src: {src} is not active!"
+        # check if dst is active, if not, we need to update the distributed group
+        if not dst not in active_ranks:
+            self.workers[dst-1].is_active = True
+            active_ranks = self.get_active_ranks()
+            self.update_active_ranks(active_ranks)
+        
+        # load the shard data in liquid mode
+        # self._run_workers("liquid_data", shard_ids=shard_ids, src=src, dst=dst)
+         
+        return liquid_output
 
     def update_active_ranks(self,active_ranks: List[int]):
         self._run_workers("update_active_ranks", active_ranks=active_ranks, only_active_workers=False)

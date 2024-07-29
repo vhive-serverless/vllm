@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, ClassVar, Iterable, List, Optional
 from typing import Sequence as GenericSequence
 from typing import Type, TypeVar, Union
+from queue import Queue
 
 from transformers import GenerationConfig, PreTrainedTokenizer
 
@@ -38,6 +39,7 @@ from vllm.transformers_utils.tokenizer_group import (BaseTokenizerGroup,
 from vllm.usage.usage_lib import (UsageContext, is_usage_stats_enabled,
                                   usage_message)
 from vllm.utils import Counter
+from vllm.liquid.request import LiquidRequest, LiquidOutput
 
 logger = init_logger(__name__)
 _LOCAL_LOGGING_INTERVAL_SEC = 5
@@ -212,6 +214,7 @@ class LLMEngine:
         self.metrics_record = metrics_record
         self.log_stats = log_stats
         self.liquid_config = liquid_config
+        self.liquid_request_queue: Queue[LiquidRequest] = Queue()
 
         if not self.model_config.skip_tokenizer_init:
             self.tokenizer = self._init_tokenizer()
@@ -387,6 +390,8 @@ class LLMEngine:
 
     MISSING_TOKENIZER_GROUP_MSG = ("Unable to get tokenizer because "
                                    "skip_tokenizer_init is True")
+
+
 
     def get_tokenizer_group(
             self,
@@ -717,6 +722,23 @@ class LLMEngine:
             request_outputs.append(request_output)
         return request_outputs
 
+    def do_liquid(self, shard_ids: List[int], src: int, dst: int):
+        liquid_request: LiquidRequest = LiquidRequest(shard_ids, src, dst)
+        self.liquid_request_queue.put(liquid_request)
+
+    def _do_liquid(self, liquid_request: LiquidRequest) -> LiquidOutput:
+        return self.model_executor.do_liquid(liquid_request)
+
+    def check_liquid_request_and_complete(self):
+        if self.liquid_request_queue.qsize() != 0:
+            liquid_request = self.liquid_request_queue.get()
+            try:
+                liquid_output = self._do_liquid(liquid_request)
+                logger.info(f"{liquid_output}")
+            except Exception as e:
+                logger.error(f"Failed to perform liquid! error: {e}")
+                raise Exception(e)
+
     def step(self) -> List[Union[RequestOutput, EmbeddingRequestOutput]]:
         """Performs one decoding iteration and returns newly generated results.
 
@@ -768,6 +790,8 @@ class LLMEngine:
             >>>     if not (engine.has_unfinished_requests() or example_inputs):
             >>>         break
         """
+        self.check_liquid_request_and_complete()
+
         seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
 
         if not scheduler_outputs.is_empty():
