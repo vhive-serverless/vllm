@@ -8,6 +8,7 @@ from torch.distributed import ProcessGroup
 
 from .parallel_state import (get_cpu_world_group, get_pp_pynccl_communicator,
                              get_tensor_model_parallel_group,
+                             get_tensor_model_parallel_cpu_group,
                              get_tensor_model_parallel_rank,
                              get_tensor_model_parallel_world_size,
                              get_tp_ca_communicator,

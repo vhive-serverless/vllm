@@ -53,10 +53,9 @@ _PP_GLOBAL_RANKS: Optional[List[int]] = None
 
 _LOCAL_RANK = -1
 
-ACTIVE_GROUP_MANAGER = None
 
 class ActiveGroupManager:
-    def __init__(self, world_size: int, backend: str) -> None:
+    def __init__(self, world_size: int) -> None:
         self._TP_DEVICE_GROUP: Optional[ProcessGroup] = None
         self._TP_CPU_GROUP: Optional[ProcessGroup] = None
         self._TP_PYNCCL_COMMUNICATOR = None
@@ -66,7 +65,7 @@ class ActiveGroupManager:
         self._CPU_WORLD_GROUP = None
 
         self.world_size = world_size
-        self.backend = backend
+        self.backend = "nccl"
         self.active_ranks = []
         for i in range(self.world_size):
             self.active_ranks.append(i)
@@ -77,12 +76,12 @@ class ActiveGroupManager:
         self.destroy_model_parallel()
 
         self._TP_DEVICE_GROUP = torch.distributed.new_group(ranks=active_ranks, backend=self.backend)
-        self._TP_CPU_GROUP = torch.distributed.new_group(ranks=active_ranks, backend=self.backend) 
+        self._TP_CPU_GROUP = torch.distributed.new_group(ranks=active_ranks, backend="gloo") 
 
     
         from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
         self._TP_PYNCCL_COMMUNICATOR = PyNcclCommunicator(
-            group=self._TP_DEVICE_GROUP,
+            group=self._TP_CPU_GROUP,
             device=_LOCAL_RANK,
         )
 
@@ -95,8 +94,6 @@ class ActiveGroupManager:
                 device=_LOCAL_RANK,
             )
 
-
-
     def destroy_model_parallel(self):
         if self._TP_DEVICE_GROUP:
             torch.distributed.destroy_process_group(self._TP_DEVICE_GROUP)
@@ -107,6 +104,7 @@ class ActiveGroupManager:
         self._TP_PYNCCL_COMMUNICATOR = None
         self._TP_CA_COMMUNICATOR = None
 
+ACTIVE_GROUP_MANAGER: Optional[ActiveGroupManager] = None
         
 
 
@@ -135,6 +133,13 @@ def get_tp_ca_communicator():
 def get_local_rank():
     global _LOCAL_RANK
     return _LOCAL_RANK
+
+def update_active_ranks(
+        active_ranks: List[int]
+):
+    global ACTIVE_GROUP_MANAGER
+    assert ACTIVE_GROUP_MANAGER != None
+    ACTIVE_GROUP_MANAGER.update_active_ranks(active_ranks)
 
 
 def init_distributed_environment(
@@ -183,6 +188,9 @@ def init_distributed_environment(
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         del data
+        global ACTIVE_GROUP_MANAGER
+        if ACTIVE_GROUP_MANAGER is None or ACTIVE_GROUP_MANAGER._TP_DEVICE_GROUP is None:
+            ACTIVE_GROUP_MANAGER = ActiveGroupManager(world_size)
 
 
 def initialize_model_parallel(
@@ -325,16 +333,14 @@ def get_cpu_world_group():
 
 def get_tensor_model_parallel_group():
     """Get the tensor model parallel group the caller rank belongs to."""
-    assert _TP_DEVICE_GROUP is not None, (
-        "tensor model parallel group is not initialized")
-    return _TP_DEVICE_GROUP
+    assert ACTIVE_GROUP_MANAGER
+    return ACTIVE_GROUP_MANAGER._TP_DEVICE_GROUP
 
 
 def get_tensor_model_parallel_cpu_group():
     """Get the tensor model parallel cpu group the caller rank belongs to."""
-    assert _TP_CPU_GROUP is not None, (
-        "tensor model parallel cpu group is not initialized")
-    return _TP_CPU_GROUP
+    assert ACTIVE_GROUP_MANAGER
+    return ACTIVE_GROUP_MANAGER._TP_CPU_GROUP
 
 
 def get_pipeline_model_parallel_group():

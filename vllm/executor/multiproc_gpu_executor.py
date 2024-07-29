@@ -60,7 +60,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
                         local_rank=rank,
                         distributed_init_method=distributed_init_method,
                     ),
-                    is_active=non_driver_active
+                    is_active=non_driver_active,
                     ) for rank in range(1, worker_num)
             ]
 
@@ -71,11 +71,16 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         self.driver_worker = self._create_worker(
             distributed_init_method=distributed_init_method)
         self._run_workers("init_device")
+        if self.liquid_config is not None:
+            self._run_workers("update_active_ranks", active_ranks=[0], only_active_workers=False)
         self._run_workers("load_model",
                           max_concurrent_workers=self.parallel_config.
                           max_parallel_loading_workers,
                           only_active_workers=True,
                           )
+
+    def update_active_ranks(self,active_ranks: List[int]):
+        self._run_workers("update_active_ranks", active_ranks=active_ranks, only_active_workers=False)
 
     def shutdown(self):
         if (worker_monitor := getattr(self, "worker_monitor",
@@ -168,8 +173,15 @@ class MultiprocessingGPUExecutorAsync(MultiprocessingGPUExecutor,
         return await self.driver_exec_model(execute_model_req)
 
     async def _start_worker_execution_loop(self):
+        if self.liquid_config is None:
+            workers = self.workers
+        else:
+            workers = []
+            for worker in self.workers:
+                if worker.is_active:
+                    workers.append(worker)
         coros = [
             worker.execute_method_async("start_worker_execution_loop")
-            for worker in self.workers
+            for worker in workers
         ]
         return await asyncio.gather(*coros)

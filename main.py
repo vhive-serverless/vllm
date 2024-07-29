@@ -16,7 +16,6 @@ async def main():
         liquid_gpu_space = 32,
         liquid_driver_gpu_id = 0, 
         liquid_total_num_shards = 4,
-        tensor_parallel_size=2
     )
     async_engine = AsyncLLMEngine.from_engine_args(engine_args=engine_args)
 
