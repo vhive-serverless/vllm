@@ -119,8 +119,7 @@ class Worker(WorkerBase):
             raise RuntimeError(
                 f"Not support device type: {self.device_config.device}")
         # Initialize the distributed environment.
-        world_size = self.parallel_config.world_size if self.liquid_config is None else len(self.liquid_config.liquid_gpu_range)
-        init_worker_distributed_environment(world_size, self.parallel_config, self.rank,
+        init_worker_distributed_environment(self.parallel_config, self.rank,
                                             self.distributed_init_method,
                                             self.local_rank,
                                             self.liquid_config,
@@ -130,8 +129,7 @@ class Worker(WorkerBase):
 
     def update_active_ranks(self, active_ranks: List[int]):
         self.active_ranks = active_ranks
-        if self.rank in active_ranks:
-            update_active_ranks(self.active_ranks)
+        update_active_ranks(self.active_ranks)
 
     def load_model(self):
         self.model_runner.load_model()
@@ -367,7 +365,6 @@ class Worker(WorkerBase):
 
 
 def init_worker_distributed_environment(
-    world_size: int,
     parallel_config: ParallelConfig,
     rank: int,
     distributed_init_method: Optional[str] = None,
@@ -376,8 +373,12 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     set_custom_all_reduce(not parallel_config.disable_custom_all_reduce)
+    if liquid_config is None:
+        world_size = parallel_config.tensor_parallel_size
+    else:
+        world_size = len(liquid_config.liquid_gpu_range)
 
-    init_distributed_environment(world_size, rank,
+    init_distributed_environment(world_size,rank,
                                  distributed_init_method, local_rank)
     if liquid_config is None:
         ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,

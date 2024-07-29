@@ -55,44 +55,43 @@ _LOCAL_RANK = -1
 
 
 class ActiveGroupManager:
-    def __init__(self, world_size: int) -> None:
+    def __init__(self, rank:int) -> None:
         self._TP_DEVICE_GROUP: Optional[ProcessGroup] = None
         self._TP_CPU_GROUP: Optional[ProcessGroup] = None
         self._TP_PYNCCL_COMMUNICATOR = None
         self._TP_CA_COMMUNICATOR = None
 
-        self._DEVICE_WORLD_GROUP = None
-        self._CPU_WORLD_GROUP = None
-
-        self.world_size = world_size
         self.backend = "nccl"
-        self.active_ranks = []
-        for i in range(self.world_size):
-            self.active_ranks.append(i)
+        self.active_ranks = [0]
+        self.rank = rank
 
     def update_active_ranks(self, active_ranks: List[int]):
         # update the active ranks and create groups
         self.active_ranks = active_ranks
         self.destroy_model_parallel()
 
-        self._TP_DEVICE_GROUP = torch.distributed.new_group(ranks=active_ranks, backend=self.backend)
-        self._TP_CPU_GROUP = torch.distributed.new_group(ranks=active_ranks, backend="gloo") 
+        # whether rank is active, must execute this
+        group = torch.distributed.new_group(ranks=active_ranks, backend=self.backend)
+        cpu_group = torch.distributed.new_group(ranks=active_ranks, backend="gloo")
+        # only active ranks need to execute following steps:
+        if self.rank in self.active_ranks:
+            self._TP_DEVICE_GROUP = group
+            self._TP_CPU_GROUP = cpu_group 
 
-    
-        from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
-        self._TP_PYNCCL_COMMUNICATOR = PyNcclCommunicator(
-            group=self._TP_CPU_GROUP,
-            device=_LOCAL_RANK,
-        )
-
-        # Initialize a custom fast all-reduce implementation.
-        if _ENABLE_CUSTOM_ALL_REDUCE:
-            from vllm.distributed.device_communicators.custom_all_reduce import (
-                CustomAllreduce)
-            self._TP_CA_COMMUNICATOR = CustomAllreduce(
+            from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
+            self._TP_PYNCCL_COMMUNICATOR = PyNcclCommunicator(
                 group=self._TP_CPU_GROUP,
                 device=_LOCAL_RANK,
             )
+
+            # Initialize a custom fast all-reduce implementation.
+            if _ENABLE_CUSTOM_ALL_REDUCE:
+                from vllm.distributed.device_communicators.custom_all_reduce import (
+                    CustomAllreduce)
+                self._TP_CA_COMMUNICATOR = CustomAllreduce(
+                    group=self._TP_CPU_GROUP,
+                    device=_LOCAL_RANK,
+                )
 
     def destroy_model_parallel(self):
         if self._TP_DEVICE_GROUP:
@@ -190,7 +189,7 @@ def init_distributed_environment(
         del data
         global ACTIVE_GROUP_MANAGER
         if ACTIVE_GROUP_MANAGER is None or ACTIVE_GROUP_MANAGER._TP_DEVICE_GROUP is None:
-            ACTIVE_GROUP_MANAGER = ActiveGroupManager(world_size)
+            ACTIVE_GROUP_MANAGER = ActiveGroupManager(rank)
 
 
 def initialize_model_parallel(
