@@ -100,7 +100,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         assert dst > 0 and dst < len(self.workers)+1, f"liquid dst: {dst} should be in the range between 1 and {len(self.workers)+1}"
         assert src in active_ranks, f"liquid src: {src} is not active!"
         # check if dst is active, if not, we need to update the distributed group
-        if not dst not in active_ranks:
+        if dst not in active_ranks:
             self.workers[dst-1].is_active = True
             active_ranks = self.get_active_ranks()
             self.update_active_ranks(active_ranks)

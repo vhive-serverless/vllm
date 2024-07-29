@@ -19,5 +19,8 @@ class LiquidOutput:
     liquid_e2e_latency: Optional[float] = None
 
     def __repr__(self) -> str:
-        repr = f"Move shard: {self.shard_ids} from {self.src} to {self.dst}, e2e_latency: {self.liquid_e2e_latency:.2f} s; freed memory: {self.freed_memory_GB:.2f}GB"
+        repr = f"Move shard: {self.shard_ids} from {self.src} to {self.dst}"
+        if self.freed_memory_GB is not None and self.liquid_e2e_latency is not None:
+            repr += f"e2e_latency: {self.liquid_e2e_latency:.2f} s; freed memory: {self.freed_memory_GB:.2f} GB"
+
         return repr
