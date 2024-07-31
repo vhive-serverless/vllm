@@ -61,7 +61,7 @@ class DistributedGPUExecutor(GPUExecutor):
 
         self._run_workers("initialize_cache",
                           num_gpu_blocks=num_gpu_blocks,
-                          num_cpu_blocks=num_cpu_blocks)
+                          num_cpu_blocks=num_cpu_blocks, only_active_workers=True)
 
     def execute_model(
             self,

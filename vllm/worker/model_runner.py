@@ -11,20 +11,22 @@ import torch.nn as nn
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
                          ModelConfig, ParallelConfig, SchedulerConfig,
-                         VisionLanguageConfig)
+                         VisionLanguageConfig, LiquidConfig)
 from vllm.distributed import broadcast_tensor_dict
-from vllm.distributed.communication_op import graph_capture, get_tensor_model_parallel_group, get_tensor_model_parallel_cpu_group
+from vllm.distributed.communication_op import graph_capture, get_tensor_model_parallel_group, get_tensor_model_parallel_cpu_group, get_tcp_store
 from vllm.logger import init_logger
 from vllm.lora.layers import LoRAMapping
 from vllm.lora.request import LoRARequest
 from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.model_loader import get_model
+from vllm.model_executor.model_loader.loader import _initialize_sharded_model
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.sampling_params import SamplingParams
 from vllm.sequence import SamplerOutput, SequenceData, SequenceGroupMetadata
 from vllm.utils import (CudaMemoryProfiler, get_kv_cache_torch_dtype, is_hip,
                         is_pin_memory_available, make_tensor_with_pad)
+from vllm.liquid.utils import send_dict, receive_dict
 
 logger = init_logger(__name__)
 
@@ -85,6 +87,7 @@ class ModelRunner:
         kv_cache_dtype: Optional[str] = "auto",
         is_driver_worker: bool = False,
         vision_language_config: Optional[VisionLanguageConfig] = None,
+        liquid_config: Optional[LiquidConfig] = None,
     ):
         self.model_config = model_config
         self.parallel_config = parallel_config
@@ -95,6 +98,7 @@ class ModelRunner:
         self.load_config = load_config
         self.is_driver_worker = is_driver_worker
         self.vision_language_config = vision_language_config
+        self.liquid_config = liquid_config
 
         self.device = self.device_config.device
         self.pin_memory = is_pin_memory_available()
@@ -142,6 +146,35 @@ class ModelRunner:
         # Set after load_model.
         self.lora_manager: Optional[LRUCacheWorkerLoRAManager] = None
 
+    def send_shards(self, shard_ids: List[int], dst: int):
+        shards_weights = self.model.get_shards_weights(shard_ids, only_sharded=False)
+        # print(f"sharded_weights.keys: {shards_weights.keys()}")
+        store = get_tcp_store()
+        group = get_tensor_model_parallel_group()
+        send_dict(shards_weights, dst, store, group)
+        self.model.delete_shards(shard_ids)
+        logger.info(f"Send shards: {shard_ids} to rank: {dst}")
+
+    def recv_shards(self, shard_ids: List[int], src: int):
+        store = get_tcp_store()
+        group = get_tensor_model_parallel_group()
+        param_names = [name for name, _ in self.model.named_parameters()]
+        shards_weights = receive_dict(src, store, param_names, group)
+        self.model.load_shards_weights(shard_ids,shards_weights)
+        logger.info(f"Receive shards: {shard_ids} from rank: {src}")
+
+    def initialize_sharded_model(self, shard_ids: List[int]):
+        self.model = _initialize_sharded_model(
+            model_config=self.model_config,
+            load_config=self.load_config,
+            lora_config=self.lora_config,
+            vision_language_config=self.vision_language_config,
+            cache_config=self.cache_config,
+            liquid_config=self.liquid_config,
+            shard_ids=shard_ids,
+        ) 
+        self.model = self.model.to("cuda")
+
     def load_model(self) -> None:
         with CudaMemoryProfiler() as m:
             self.model = get_model(
@@ -153,6 +186,7 @@ class ModelRunner:
                 parallel_config=self.parallel_config,
                 scheduler_config=self.scheduler_config,
                 cache_config=self.cache_config,
+                liquid_config=self.liquid_config,
             )
 
         self.model_memory_usage = m.consumed_memory

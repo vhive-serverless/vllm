@@ -18,7 +18,7 @@ from torch import nn
 
 from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoadFormat,
                          LoRAConfig, ModelConfig, ParallelConfig,
-                         SchedulerConfig, VisionLanguageConfig)
+                         SchedulerConfig, VisionLanguageConfig, LiquidConfig)
 from vllm.envs import VLLM_USE_MODELSCOPE
 from vllm.logger import init_logger
 from vllm.model_executor.layers.quantization.base_config import (
@@ -98,6 +98,29 @@ def _initialize_model(model_config: ModelConfig, load_config: LoadConfig,
     return model_class(config=model_config.hf_config,
                        cache_config=cache_config,
                        quant_config=quant_config,
+                       **_get_model_initialization_kwargs(
+                           model_class, lora_config, vision_language_config))
+
+def _initialize_sharded_model(model_config: ModelConfig, load_config: LoadConfig,
+                      lora_config: Optional[LoRAConfig],
+                      vision_language_config: Optional[VisionLanguageConfig],
+                      cache_config: CacheConfig,
+                      liquid_config: Optional[LiquidConfig],
+                      shard_ids: List[int],) -> nn.Module:
+    """Initialize a model with the given configurations."""
+    if liquid_config == None:
+        liquid = False
+    else:
+        liquid = True
+    model_class = get_model_architecture(model_config, liquid)[0]
+    quant_config = _get_quantization_config(model_config, load_config)
+
+    return model_class(config=model_config.hf_config,
+                       cache_config=cache_config,
+                       quant_config=quant_config,
+                       liquid_config=liquid_config,
+                       shard_ids=shard_ids,
+                       
                        **_get_model_initialization_kwargs(
                            model_class, lora_config, vision_language_config))
 
@@ -836,7 +859,9 @@ class ServerlessLLMLoader(BaseModelLoader):
                    vision_language_config: Optional[VisionLanguageConfig],
                    parallel_config: ParallelConfig,
                    scheduler_config: SchedulerConfig,
-                   cache_config: CacheConfig) -> nn.Module:
+                   cache_config: CacheConfig,
+                   liquid_config: Optional[LiquidConfig],
+                   ) -> nn.Module:
         from serverless_llm_store.client import SllmStoreClient
         from serverless_llm_store import load_into_cpu_non_blocking, load_into_gpu_non_blocking, wait_dict_loaded
         from serverless_llm_store import load_dict
@@ -879,9 +904,16 @@ class ServerlessLLMLoader(BaseModelLoader):
         with set_default_torch_dtype(model_config.dtype):
             # with torch.device(device_config.device):
             with torch.device("cpu"):
-                model = _initialize_model(model_config, self.load_config,
-                                        lora_config, vision_language_config,
-                                        cache_config)
+                if liquid_config is None:
+                    model = _initialize_model(model_config, self.load_config,
+                                            lora_config, vision_language_config,
+                                            cache_config)
+                else:
+                    # load model only loads full shards from cpu
+                    shard_ids = list(range(liquid_config.liquid_total_num_shards))
+
+                    model = _initialize_sharded_model(model_config, self.load_config, lora_config, vision_language_config, cache_config, liquid_config, shard_ids)
+
                 model = model.eval()
             # set all parameters to meta device
             state_dict = self._filter_subtensors(model.state_dict())
