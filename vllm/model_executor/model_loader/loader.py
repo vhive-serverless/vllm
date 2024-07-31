@@ -264,12 +264,20 @@ class DefaultModelLoader(BaseModelLoader):
                    vision_language_config: Optional[VisionLanguageConfig],
                    parallel_config: ParallelConfig,
                    scheduler_config: SchedulerConfig,
-                   cache_config: CacheConfig) -> nn.Module:
+                   cache_config: CacheConfig,
+                   liquid_config: Optional[LiquidConfig],
+                   ) -> nn.Module:
         with set_default_torch_dtype(model_config.dtype):
             with torch.device(device_config.device):
-                model = _initialize_model(model_config, self.load_config,
-                                          lora_config, vision_language_config,
-                                          cache_config)
+                if liquid_config is None:
+                    model = _initialize_model(model_config, self.load_config,
+                                            lora_config, vision_language_config,
+                                            cache_config)
+                else:
+                    # load model only loads full shards from cpu
+                    shard_ids = list(range(liquid_config.liquid_total_num_shards))
+
+                    model = _initialize_sharded_model(model_config, self.load_config, lora_config, vision_language_config, cache_config, liquid_config, shard_ids)
             model.load_weights(
                 self._get_weights_iterator(model_config.model,
                                            model_config.revision,

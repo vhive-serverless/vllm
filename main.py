@@ -5,17 +5,18 @@ import asyncio
 import os
 
 model = "facebook/opt-125m"
-model_path = os.path.join("./models", model)
+# model_path = os.path.join("./models", model)
 
 async def main():
     engine_args = AsyncEngineArgs(
-        model_path, 
+        model, 
         enforce_eager=True,
-        load_format="serverless_llm",
+        load_format="auto",
         liquid_gpu_range = [0,1],
         liquid_gpu_space = 32,
         liquid_driver_gpu_id = 0, 
         liquid_total_num_shards = 4,
+        gpu_memory_utilization=0.3
     )
     async_engine = AsyncLLMEngine.from_engine_args(engine_args=engine_args)
 

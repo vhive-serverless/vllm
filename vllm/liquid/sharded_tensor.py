@@ -11,19 +11,19 @@ class ShardedTensor(Tensor):
 
     def __init__(self, 
                  data: torch.Tensor,
-                 total_num_shards: int = 1,
+                 num_shards: int = 1,
                  shard_dim: int = 0,
                  shard_ids : Optional[List[int]] = None
                  ):
         super().__init__()
         self.data = data
         if shard_ids:
-            assert total_num_shards == len(shard_ids), f"num_shards:{total_num_shards} does not equal to the length of shard_ids: {len(shard_ids)}"
+            assert num_shards == len(shard_ids), f"num_shards:{num_shards} does not equal to the length of shard_ids: {len(shard_ids)}"
         else:
-            shard_ids = list(range(total_num_shards))
+            shard_ids = list(range(num_shards))
 
-        self.total_num_shards: int = total_num_shards
-        self.shard_ids: List[int] = shard_ids
+        self.total_num_shards: int = num_shards
+        self.shard_ids: List[int] = shard_ids.copy()
         self.shard_dim: int = shard_dim
 
         assert len(self.shape) > shard_dim, f"Tensor's shape: {self.shape} has a dimension of {len(self.shape)}, is smaller or equal to shard_dim: {shard_dim}"
@@ -107,11 +107,11 @@ class ShardedTensor(Tensor):
 class QKVShardedTensor(ShardedTensor):
     def __init__(self, 
                  data: torch.Tensor,
-                 total_num_shards: int = 1,
+                 num_shards: int = 1,
                  shard_dim: int = 0,
                  shard_ids : Optional[List[int]] = None
                  ):
-        super().__init__(data, total_num_shards, shard_dim, shard_ids)
+        super().__init__(data, num_shards, shard_dim, shard_ids)
         assert self.size(shard_dim) % 3 == 0, f"QKV parameter must have a length divisible by 3 along dim: {shard_dim}"
         qkv_shard_size = self.size(shard_dim) // 3
         self.q_data = self.narrow(shard_dim, 0, qkv_shard_size)

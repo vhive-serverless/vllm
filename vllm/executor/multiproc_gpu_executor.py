@@ -110,8 +110,18 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             active_ranks = self.get_active_ranks()
             self.update_active_ranks(active_ranks)
         
-        # load the shard data in liquid mode
-        self._run_workers("liquid_data", shard_ids=shard_ids, src=src, dst=dst, worker_ranks=[src, dst])
+        # load the shard data(model weights) in liquid mode
+        self._run_workers("liquid_model_weights", shard_ids=shard_ids, src=src, dst=dst, worker_ranks=[src, dst])
+        # update the cache engine on dst
+        # TODO: recalculates the number of gpu blocks and cpu blocks, currently just keep the same number
+        num_gpu_blocks = self.cache_config.num_gpu_blocks
+        num_cpu_blocks = self.cache_config.num_cpu_blocks
+        self._run_workers("update_cache",
+                          num_gpu_blocks=num_gpu_blocks,
+                          num_cpu_blocks=num_cpu_blocks, 
+                          shard_ids = shard_ids,
+                          worker_ranks=[src, dst])
+        self._run_workers("liquid_kv_cache", shard_ids=shard_ids, src=src, dst=dst, worker_ranks=[src, dst])
          
         return liquid_output
 
@@ -176,6 +186,9 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             worker.execute_method(method, *args, **kwargs)
             for worker in workers
         ]
+
+        if worker_ranks != None and 0 not in worker_ranks:
+            return [output.get() for output in worker_outputs]
 
         if async_run_remote_workers_only:
             # Just return futures
