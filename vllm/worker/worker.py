@@ -90,6 +90,7 @@ class Worker(WorkerBase):
             kv_cache_dtype=self.cache_config.cache_dtype,
             is_driver_worker=is_driver_worker,
             vision_language_config=vision_language_config,
+            liquid_config=self.liquid_config,
         )
         # Uninitialized cache engine. Will be initialized by
         # initialize_cache.
@@ -133,6 +134,14 @@ class Worker(WorkerBase):
 
     def load_model(self):
         self.model_runner.load_model()
+
+    def liquid_data(self, shard_ids: List[int], src: int, dst: int):
+        assert self.rank == src or self.rank == dst
+        if self.rank == src:
+            self.model_runner.send_shards(shard_ids, dst)
+        else:
+            self.model_runner.initialize_sharded_model(shard_ids)
+            self.model_runner.recv_shards(shard_ids, src)
 
     def save_sharded_state(
         self,
@@ -291,7 +300,8 @@ class Worker(WorkerBase):
         }
         group = get_tensor_model_parallel_group()
         metadata_group = get_tensor_model_parallel_cpu_group()
-        broadcast_tensor_dict(data, src=0, group=group, metadata_group=metadata_group)
+
+        broadcast_tensor_dict(data, src=0,group=group, metadata_group=metadata_group)
 
         self.cache_swap(blocks_to_swap_in, blocks_to_swap_out, blocks_to_copy)
 
@@ -322,7 +332,9 @@ class Worker(WorkerBase):
         Returns True iff there are remaining sequences to process.
         """
         assert not self.is_driver_worker
-        data = broadcast_tensor_dict(src=0)
+        group = get_tensor_model_parallel_group()
+        metadata_group = get_tensor_model_parallel_cpu_group()
+        data = broadcast_tensor_dict(src=0, group=group, metadata_group=metadata_group)
         if not data:
             return False
 

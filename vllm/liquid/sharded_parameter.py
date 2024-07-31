@@ -12,23 +12,26 @@ class ShardedParameter(Parameter):
                  data: torch.Tensor,
                  num_shards: int = 1,
                  shard_dim: int = 0,
-                 shard_ids : Optional[List[int]] = None
+                 shard_ids : Optional[List[int]] = None,
+                 requires_grad: bool = True,
                  ):
         super().__init__()
-        if shard_ids:
+        self.requires_grad = requires_grad
+        if shard_ids is not None:
             assert num_shards == len(shard_ids), f"num_shards:{num_shards} does not equal to the length of shard_ids: {len(shard_ids)}"
         else:
             shard_ids = list(range(num_shards))
 
         self.data = data
         self.num_shards: int = num_shards
-        self.shard_ids: List[int] = shard_ids
+        self.shard_ids: List[int] = shard_ids.copy()
         self.shard_dim: int = shard_dim
 
         assert len(self.shape) > shard_dim, f"Tensor's shape: {self.shape} has a dimension of {len(self.shape)}, is smaller or equal to shard_dim: {shard_dim}"
         assert self.shape[self.shard_dim] % self.num_shards == 0, f"Tensor's {self.shard_dim} dim with length: {self.shape[self.shard_dim]} is not divisible by number of shards: {self.num_shards}"
 
-        self.shard_size = self.shape[self.shard_dim] // self.num_shards
+        self.shard_size = self.size(self.shard_dim) // self.num_shards
+        pass
 
     def _get_shard(self, tensor: torch.Tensor, shard_id: int) -> torch.Tensor:
         index = self.shard_ids.index(shard_id)
@@ -37,12 +40,12 @@ class ShardedParameter(Parameter):
         shard = tensor.narrow(self.shard_dim, start_index, self.shard_size)
         return shard
 
-    def get_shard(self, shard_id: int) -> Parameter:
+    def get_shard(self, shard_id: int) -> torch.Tensor:
         if shard_id not in self.shard_ids:
             raise ValueError(f"shard_id: {shard_id} not in self.shard_ids")
 
         shard = self._get_shard(self.data, shard_id)
-        return Parameter(shard)
+        return shard
 
     def _delete_shard(self, tensor: torch.Tensor, shard_id: int) -> torch.Tensor:
         index = self.shard_ids.index(shard_id)
@@ -58,7 +61,7 @@ class ShardedParameter(Parameter):
 
     def delete_shard(self, shard_id: int) -> None:
         if shard_id not in self.shard_ids:
-            raise ValueError(f"shard_id: {shard_id} not in self.shard_ids")
+            raise ValueError(f"shard_id: {shard_id} not in self.shard_ids: {self.shard_ids}")
         new_data = self._delete_shard(self.data, shard_id)
         self.data = new_data
 
@@ -99,9 +102,11 @@ class QKVShardedParameter(ShardedParameter):
                  data: torch.Tensor,
                  num_shards: int = 1,
                  shard_dim: int = 0,
-                 shard_ids : Optional[List[int]] = None
+                 shard_ids : Optional[List[int]] = None,
+                 requires_grad: bool = True,
                  ):
         super().__init__(data, num_shards, shard_dim, shard_ids)
+        self.requires_grad = requires_grad
         self.shard_size = self.shard_size // 3
         assert self.size(shard_dim) % 3 == 0, f"QKV parameter must have a length divisible by 3 along dim: {shard_dim}"
         qkv_shard_size = self.size(shard_dim) // 3
@@ -109,13 +114,13 @@ class QKVShardedParameter(ShardedParameter):
         self.k_data = self.narrow(shard_dim, qkv_shard_size, qkv_shard_size)
         self.v_data = self.narrow(shard_dim, 2*qkv_shard_size, qkv_shard_size)
 
-    def get_shard(self, shard_id: int) -> Parameter:
+    def get_shard(self, shard_id: int) -> torch.Tensor:
         q_shard = self._get_shard(self.q_data, shard_id)
         k_shard = self._get_shard(self.k_data, shard_id)
         v_shard = self._get_shard(self.v_data, shard_id)
 
         shard = torch.cat([q_shard, k_shard, v_shard], dim=self.shard_dim)
-        return Parameter(shard)
+        return shard
 
     def delete_shard(self, shard_id: int) -> None:
         self.q_data = self._delete_shard(self.q_data, shard_id)

@@ -93,17 +93,25 @@ class ActiveGroupManager:
                     device=_LOCAL_RANK,
                 )
 
+            
+
     def destroy_model_parallel(self):
-        if self._TP_DEVICE_GROUP:
+        if self._TP_DEVICE_GROUP is not None:
             torch.distributed.destroy_process_group(self._TP_DEVICE_GROUP)
         self._TP_DEVICE_GROUP = None
-        if self._TP_CPU_GROUP:
+        if self._TP_CPU_GROUP is not None:
             torch.distributed.destroy_process_group(self._TP_CPU_GROUP)
         self._TP_CPU_GROUP = None
         self._TP_PYNCCL_COMMUNICATOR = None
         self._TP_CA_COMMUNICATOR = None
 
 ACTIVE_GROUP_MANAGER: Optional[ActiveGroupManager] = None
+TCP_STORE_PORT = 7001
+TCP_STORE = None
+
+def get_tcp_store():
+    global TCP_STORE
+    return TCP_STORE
         
 
 
@@ -191,6 +199,10 @@ def init_distributed_environment(
         if ACTIVE_GROUP_MANAGER is None or ACTIVE_GROUP_MANAGER._TP_DEVICE_GROUP is None:
             ACTIVE_GROUP_MANAGER = ActiveGroupManager(rank)
 
+        global TCP_STORE, TCP_STORE_PORT
+        host = envs.VLLM_HOST_IP if envs.VLLM_HOST_IP != "" else "127.0.0.1"
+        TCP_STORE = torch.distributed.TCPStore(host, TCP_STORE_PORT, world_size, (rank==0))
+        
 
 def initialize_model_parallel(
     tensor_model_parallel_size: int = 1,

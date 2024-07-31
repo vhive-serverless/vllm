@@ -90,6 +90,11 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
                 active_ranks.append(rank)
         return active_ranks
 
+    def get_worker_by_rank(self, rank: int):
+        assert rank != 0
+        index = rank - 1
+        return self.workers[index]
+
     def do_liquid(self, liquid_request: LiquidRequest) -> LiquidOutput:
         shard_ids = liquid_request.shard_ids
         src = liquid_request.src
@@ -106,7 +111,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             self.update_active_ranks(active_ranks)
         
         # load the shard data in liquid mode
-        # self._run_workers("liquid_data", shard_ids=shard_ids, src=src, dst=dst)
+        self._run_workers("liquid_data", shard_ids=shard_ids, src=src, dst=dst, worker_ranks=[src, dst])
          
         return liquid_output
 
@@ -117,6 +122,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         if (worker_monitor := getattr(self, "worker_monitor",
                                       None)) is not None:
             worker_monitor.close()
+
 
     def _driver_execute_model(
         self,
@@ -137,6 +143,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         async_run_remote_workers_only: bool = False,
         max_concurrent_workers: Optional[int] = None,
         only_active_workers: bool = False,
+        worker_ranks: Optional[List[int]] = None,
         **kwargs,
     ) -> Any:
         """Runs the given method on all workers.
@@ -147,14 +154,18 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
                 run asynchronously and return a list of futures rather than
                 blocking on the results.
         """
-
-        if only_active_workers:
-            workers = []
-            for worker in self.workers:
-                if worker.is_active:
-                    workers.append(worker)
+        workers = []
+        if worker_ranks != None:
+            for rank in worker_ranks:
+                if rank != 0:
+                    workers.append(self.get_worker_by_rank(rank))
         else:
-            workers = self.workers
+            if only_active_workers:
+                for worker in self.workers:
+                    if worker.is_active:
+                        workers.append(worker)
+            else:
+                workers = self.workers
 
         if max_concurrent_workers:
             raise NotImplementedError(

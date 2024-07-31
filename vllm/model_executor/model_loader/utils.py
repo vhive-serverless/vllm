@@ -19,7 +19,7 @@ def set_default_torch_dtype(dtype: torch.dtype):
 
 
 def get_model_architecture(
-        model_config: ModelConfig) -> Tuple[Type[nn.Module], str]:
+        model_config: ModelConfig, liquid: bool = False) -> Tuple[Type[nn.Module], str]:
     architectures = getattr(model_config.hf_config, "architectures", [])
     # Special handling for quantized Mixtral.
     # FIXME(woosuk): This is a temporary hack.
@@ -29,7 +29,7 @@ def get_model_architecture(
         architectures = ["QuantMixtralForCausalLM"]
 
     for arch in architectures:
-        model_cls = ModelRegistry.load_model_cls(arch)
+        model_cls = ModelRegistry.load_model_cls(arch, liquid)
         if model_cls is not None:
             return (model_cls, arch)
     raise ValueError(

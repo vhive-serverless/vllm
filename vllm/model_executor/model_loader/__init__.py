@@ -4,7 +4,7 @@ from torch import nn
 
 from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
                          ModelConfig, ParallelConfig, SchedulerConfig,
-                         VisionLanguageConfig)
+                         VisionLanguageConfig, LiquidConfig)
 from vllm.model_executor.model_loader.loader import (BaseModelLoader,
                                                      get_model_loader)
 from vllm.model_executor.model_loader.utils import (
@@ -16,7 +16,8 @@ def get_model(*, model_config: ModelConfig, load_config: LoadConfig,
               scheduler_config: SchedulerConfig,
               lora_config: Optional[LoRAConfig],
               vision_language_config: Optional[VisionLanguageConfig],
-              cache_config: CacheConfig) -> nn.Module:
+              cache_config: CacheConfig,
+              liquid_config: Optional[LiquidConfig]) -> nn.Module:
     loader = get_model_loader(load_config)
     return loader.load_model(model_config=model_config,
                              device_config=device_config,
@@ -24,7 +25,9 @@ def get_model(*, model_config: ModelConfig, load_config: LoadConfig,
                              vision_language_config=vision_language_config,
                              parallel_config=parallel_config,
                              scheduler_config=scheduler_config,
-                             cache_config=cache_config)
+                             cache_config=cache_config,
+                             liquid_config = liquid_config,
+                             )
 
 
 __all__ = [
