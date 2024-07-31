@@ -27,6 +27,8 @@ from vllm.sequence import SamplerOutput, SequenceData, SequenceGroupMetadata
 from vllm.utils import (CudaMemoryProfiler, get_kv_cache_torch_dtype, is_hip,
                         is_pin_memory_available, make_tensor_with_pad)
 from vllm.liquid.utils import send_dict, receive_dict
+from vllm.model_executor.model_loader.utils import (get_model_architecture,
+                                                    set_default_torch_dtype)
 
 logger = init_logger(__name__)
 
@@ -164,16 +166,17 @@ class ModelRunner:
         logger.info(f"Receive shards: {shard_ids} from rank: {src}")
 
     def initialize_sharded_model(self, shard_ids: List[int]):
-        self.model = _initialize_sharded_model(
-            model_config=self.model_config,
-            load_config=self.load_config,
-            lora_config=self.lora_config,
-            vision_language_config=self.vision_language_config,
-            cache_config=self.cache_config,
-            liquid_config=self.liquid_config,
-            shard_ids=shard_ids,
-        ) 
-        self.model = self.model.to("cuda")
+        with set_default_torch_dtype(self.model_config.dtype):
+            with torch.device(self.device_config.device):
+                self.model = _initialize_sharded_model(
+                    model_config=self.model_config,
+                    load_config=self.load_config,
+                    lora_config=self.lora_config,
+                    vision_language_config=self.vision_language_config,
+                    cache_config=self.cache_config,
+                    liquid_config=self.liquid_config,
+                    shard_ids=shard_ids,
+                ) 
 
     def load_model(self) -> None:
         with CudaMemoryProfiler() as m:
@@ -794,7 +797,6 @@ class ModelRunner:
             attn_metadata=attn_metadata,
             **multi_modal_kwargs,
         )
-
         # Compute the logits.
         logits = self.model.compute_logits(hidden_states, sampling_metadata)
 

@@ -16,7 +16,9 @@ from vllm.distributed import (broadcast_tensor_dict,
                               update_active_ranks,
                               )
 from vllm.distributed.parallel_state import (get_tensor_model_parallel_group,
-                                             get_tensor_model_parallel_cpu_group)
+                                             get_tensor_model_parallel_cpu_group,
+                                             get_tcp_store,
+                                             )
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
 from vllm.sequence import ExecuteModelRequest, PoolerOutput, SamplerOutput
@@ -24,6 +26,7 @@ from vllm.worker.cache_engine import CacheEngine
 from vllm.worker.embedding_model_runner import EmbeddingModelRunner
 from vllm.worker.model_runner import ModelRunner
 from vllm.worker.worker_base import WorkerBase
+from vllm.liquid.utils import send_dict, receive_dict
 
 
 class Worker(WorkerBase):
@@ -135,13 +138,29 @@ class Worker(WorkerBase):
     def load_model(self):
         self.model_runner.load_model()
 
-    def liquid_data(self, shard_ids: List[int], src: int, dst: int):
+    def liquid_model_weights(self, shard_ids: List[int], src: int, dst: int):
         assert self.rank == src or self.rank == dst
         if self.rank == src:
             self.model_runner.send_shards(shard_ids, dst)
         else:
             self.model_runner.initialize_sharded_model(shard_ids)
             self.model_runner.recv_shards(shard_ids, src)
+
+    def update_cache(self, num_gpu_blocks: int, num_cpu_blocks: int, shard_ids: List[int]):
+        if hasattr(self, "cache_engine"):
+            if self.cache_engine.num_gpu_blocks == num_gpu_blocks:
+                return
+        else:
+            self.cache_config.num_gpu_blocks = num_gpu_blocks
+            self.cache_config.num_cpu_blocks = num_cpu_blocks
+            self._init_cache_engine(shard_ids)
+
+    def liquid_kv_cache(self, shard_ids: List[int], src: int, dst: int):
+        assert self.rank == src or self.rank == dst
+        if self.rank == src:
+            self.cache_engine.send_shards(shard_ids, dst)
+        else:
+            self.cache_engine.recv_shards(shard_ids, src)
 
     def save_sharded_state(
         self,
@@ -231,10 +250,17 @@ class Worker(WorkerBase):
         self._init_cache_engine()
         self._warm_up_model()
 
-    def _init_cache_engine(self):
+    def _init_cache_engine(self, shard_ids: Optional[List[int]]=None):
+        if self.liquid_config is None:
+            shard_ids = [0]
+            total_num_shards = 1
+        else:
+            total_num_shards = self.liquid_config.liquid_total_num_shards
+            shard_ids = shard_ids if shard_ids is not None else list(range(total_num_shards))
+
         assert self.cache_config.num_gpu_blocks is not None
         self.cache_engine = CacheEngine(self.cache_config, self.model_config,
-                                        self.parallel_config)
+                                        self.parallel_config, shard_ids=shard_ids, total_num_shards=total_num_shards)
         self.gpu_cache = self.cache_engine.gpu_cache
 
     def _warm_up_model(self) -> None:

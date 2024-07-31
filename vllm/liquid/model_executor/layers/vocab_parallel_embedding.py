@@ -211,7 +211,7 @@ class VocabParallelEmbedding(torch.nn.Module):
                         dtype=params_dtype),
             shard_ids=shard_ids,
             num_shards=len(shard_ids),
-            shard_dim=0
+            shard_dim=0,
         )
         set_weight_attrs(self.weight, {
             "parallel_dim": 0,
@@ -304,6 +304,7 @@ class VocabParallelEmbedding(torch.nn.Module):
         param[loaded_weight.shape[0]:].data.fill_(0)
 
     def forward(self, input_):
+        self.tp_size = get_tensor_model_parallel_world_size()
         if self.tp_size > 1:
             # Build the mask.
             masked_input, input_mask = get_masked_input_and_mask(

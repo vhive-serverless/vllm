@@ -33,6 +33,8 @@ class Attention(nn.Module):
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
         blocksparse_params: Optional[Dict[str, Any]] = None,
+        shard_ids: List[int] = [0],
+        total_num_shards: int = 1,
     ) -> None:
         super().__init__()
         if cache_config is not None:
@@ -69,14 +71,19 @@ class Attention(nn.Module):
         # During model initialization, the default dtype is set as the model
         # weight and activation dtype.
         dtype = torch.get_default_dtype()
-        attn_backend = get_attn_backend(num_heads, head_size, num_kv_heads,
-                                        sliding_window, dtype, kv_cache_dtype,
-                                        block_size, blocksparse_params
-                                        is not None)
+        if total_num_shards == 1:
+            attn_backend = get_attn_backend(num_heads, head_size, num_kv_heads,
+                                            sliding_window, dtype, kv_cache_dtype,
+                                            block_size, blocksparse_params
+                                            is not None)
+        else:
+            from vllm.attention.backends.xformers_liquid import (  # noqa: F401
+                XFormersBackend)
+            attn_backend = XFormersBackend
         impl_cls = attn_backend.get_impl_cls()
         self.impl = impl_cls(num_heads, head_size, scale, num_kv_heads,
                              alibi_slopes, sliding_window, kv_cache_dtype,
-                             blocksparse_params)
+                             blocksparse_params, shard_ids)
 
     def forward(
         self,
@@ -88,6 +95,9 @@ class Attention(nn.Module):
     ) -> torch.Tensor:
         return self.impl.forward(query, key, value, kv_cache, attn_metadata,
                                  self._kv_scale)
+
+    def delete_shard(self, shard_id) -> None:
+        return self.impl.delete_shard(shard_id)
 
     def extra_repr(self) -> str:
         s = f"head_size={self.impl.head_size}"  # type: ignore

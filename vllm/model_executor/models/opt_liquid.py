@@ -99,7 +99,10 @@ class OPTAttention(nn.Module):
                               self.head_dim,
                               scale=self.scaling,
                               cache_config=cache_config,
-                              quant_config=quant_config)
+                              quant_config=quant_config,
+                              shard_ids=shard_ids,
+                              total_num_shards=total_num_shards,
+                              )
 
     def forward(
         self,
@@ -373,6 +376,13 @@ class OPTForCausalLM(nn.Module):
         for name, param in self.named_parameters():
             if hasattr(param, "num_shards"):
                 param.delete_shard(shard_id)
+
+        for layer in self.model.decoder.layers:
+            layer.self_attn.attn.delete_shard(shard_id)
+
+        
+        index = self.shard_ids.index(shard_id)
+        self.shard_ids.pop(index)
                 
 
     def load_shards_weights(self, shard_ids: List[int], shards_weights: Dict[str, torch.Tensor]):

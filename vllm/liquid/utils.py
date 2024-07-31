@@ -13,7 +13,7 @@ def _encode_dict_to_tensors(tensor_dict, dtype=torch.float16):
     for key, tensor in tensor_dict.items():
         length = tensor.numel()
         meta_data[key] = (start_idx, length, tensor.shape, tensor.dtype)
-        data_list.append(tensor.flatten().to(device="cuda", dtype=dtype))
+        data_list.append(tensor.flatten())
         start_idx += length
     
     data_tensor = torch.cat(data_list).cuda()

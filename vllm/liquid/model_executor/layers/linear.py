@@ -704,6 +704,7 @@ class RowParallelLinear(LinearBase):
         param_data.copy_(loaded_weight)
 
     def forward(self, input_):
+        self.tp_size = get_tensor_model_parallel_world_size()
         # Set up backprop all-reduce.
         if self.input_is_parallel:
             input_parallel = input_
