@@ -69,9 +69,9 @@ class ShardedParameter(Parameter):
         self.shard_ids.pop(index)
 
     def _is_appendable(self, shard_data: torch.Tensor) -> bool:
-        # Check if the dimension of shard_dim has the same size as the current shard size
-        if shard_data.size(self.shard_dim) != self.shard_size:
-            return False
+        # # Check if the dimension of shard_dim has the same size as the current shard size
+        # if shard_data.size(self.shard_dim) != self.shard_size:
+        #     return False
         
         # Check if all other dimensions are identical to the current data
         for dim in range(shard_data.dim()):

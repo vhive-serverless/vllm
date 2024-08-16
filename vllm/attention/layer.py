@@ -81,9 +81,15 @@ class Attention(nn.Module):
                 XFormersBackend)
             attn_backend = XFormersBackend
         impl_cls = attn_backend.get_impl_cls()
-        self.impl = impl_cls(num_heads, head_size, scale, num_kv_heads,
-                             alibi_slopes, sliding_window, kv_cache_dtype,
-                             blocksparse_params, shard_ids)
+        if total_num_shards == 1:
+            self.impl = impl_cls(num_heads, head_size, scale, num_kv_heads,
+                                alibi_slopes, sliding_window, kv_cache_dtype,
+                                blocksparse_params)
+        else:
+            self.impl = impl_cls(num_heads, head_size, scale, num_kv_heads,
+                                alibi_slopes, sliding_window, kv_cache_dtype,
+                                blocksparse_params, shard_ids)
+
 
     def forward(
         self,
@@ -98,6 +104,9 @@ class Attention(nn.Module):
 
     def delete_shard(self, shard_id) -> None:
         return self.impl.delete_shard(shard_id)
+
+    def append_shard(self, shard_id) -> None:
+        return self.impl.append_shard(shard_id)
 
     def extra_repr(self) -> str:
         s = f"head_size={self.impl.head_size}"  # type: ignore

@@ -138,13 +138,18 @@ class Worker(WorkerBase):
     def load_model(self):
         self.model_runner.load_model()
 
-    def liquid_model_weights(self, shard_ids: List[int], src: int, dst: int):
+    def liquid_model_weights(self, shard_ids: List[int], src: int, dst: int, only_send_sharded_weights: bool = False):
         assert self.rank == src or self.rank == dst
         if self.rank == src:
-            self.model_runner.send_shards(shard_ids, dst)
+            self.model_runner.send_shards(shard_ids, dst, only_sharded=only_send_sharded_weights)
         else:
-            self.model_runner.initialize_sharded_model(shard_ids)
-            self.model_runner.recv_shards(shard_ids, src)
+            if not hasattr(self.model_runner, "model"):
+                self.model_runner.initialize_sharded_model(shard_ids)
+                shards_weights = self.model_runner.recv_shards(shard_ids, src, only_sharded=False)
+                self.model_runner.model.load_shards_weights(shard_ids,shards_weights)
+            else:
+                shards_weights = self.model_runner.recv_shards(shard_ids, src, only_sharded=True)
+                self.model_runner.model.append_shards_weights(shard_ids, shards_weights)
 
     def update_cache(self, num_gpu_blocks: int, num_cpu_blocks: int, shard_ids: List[int]):
         if hasattr(self, "cache_engine"):
@@ -155,12 +160,17 @@ class Worker(WorkerBase):
             self.cache_config.num_cpu_blocks = num_cpu_blocks
             self._init_cache_engine(shard_ids)
 
-    def liquid_kv_cache(self, shard_ids: List[int], src: int, dst: int):
+    def liquid_kv_cache(self, shard_ids: List[int], src: int, dst: int, load_kv_cache):
         assert self.rank == src or self.rank == dst
         if self.rank == src:
             self.cache_engine.send_shards(shard_ids, dst)
         else:
-            self.cache_engine.recv_shards(shard_ids, src)
+            shards_cache = self.cache_engine.recv_shards(shard_ids, src)
+            if load_kv_cache:
+                self.cache_engine.load_shards(shard_ids,shards_cache)
+            else:
+                self.cache_engine.append_shards(shard_ids, shards_cache)
+
 
     def save_sharded_state(
         self,
@@ -299,7 +309,9 @@ class Worker(WorkerBase):
             # and it stops the loop when the driver broadcasts an empty input.
             # Send an empty input to notify all other workers to stop their
             # execution loop.
-            broadcast_tensor_dict({}, src=0)
+            group = get_tensor_model_parallel_group()
+            metadata_group = get_tensor_model_parallel_cpu_group()
+            broadcast_tensor_dict({}, src=0, group=group, metadata_group=metadata_group)
             return []
 
         seq_group_metadata_list = execute_model_req.seq_group_metadata_list
@@ -341,6 +353,9 @@ class Worker(WorkerBase):
         # Worker only supports single-step execution. Wrap the output in a list
         # to conform to interface.
         return [output]
+
+    def is_active(self) -> bool:
+        return self.rank in self.active_ranks
 
     @torch.inference_mode()
     def start_worker_execution_loop(self) -> None:

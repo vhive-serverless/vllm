@@ -13,7 +13,7 @@ from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
                          ModelConfig, ParallelConfig, SchedulerConfig,
                          VisionLanguageConfig, LiquidConfig)
 from vllm.distributed import broadcast_tensor_dict
-from vllm.distributed.communication_op import graph_capture, get_tensor_model_parallel_group, get_tensor_model_parallel_cpu_group, get_tcp_store
+from vllm.distributed.communication_op import graph_capture, get_device_world_group,get_tensor_model_parallel_group, get_tensor_model_parallel_cpu_group, get_tcp_store
 from vllm.logger import init_logger
 from vllm.lora.layers import LoRAMapping
 from vllm.lora.request import LoRARequest
@@ -148,22 +148,23 @@ class ModelRunner:
         # Set after load_model.
         self.lora_manager: Optional[LRUCacheWorkerLoRAManager] = None
 
-    def send_shards(self, shard_ids: List[int], dst: int):
-        shards_weights = self.model.get_shards_weights(shard_ids, only_sharded=False)
-        # print(f"sharded_weights.keys: {shards_weights.keys()}")
+    def send_shards(self, shard_ids: List[int], dst: int, only_sharded: bool = False):
+        shards_weights = self.model.get_shards_weights(shard_ids, only_sharded=only_sharded)
         store = get_tcp_store()
-        group = get_tensor_model_parallel_group()
+        group = get_device_world_group()
         send_dict(shards_weights, dst, store, group)
         self.model.delete_shards(shard_ids)
-        logger.info(f"Send shards: {shard_ids} to rank: {dst}")
+        logger.info(f"Successfully send model weights shards: {shard_ids} to rank: {dst}")
 
-    def recv_shards(self, shard_ids: List[int], src: int):
+    def recv_shards(self, shard_ids: List[int], src: int, only_sharded: bool = False):
         store = get_tcp_store()
-        group = get_tensor_model_parallel_group()
-        param_names = [name for name, _ in self.model.named_parameters()]
+        group = get_device_world_group()
+        if only_sharded:
+            param_names = [name for name, _ in self.model.named_sharded_parameters()]
+        else:
+            param_names = [name for name, _ in self.model.named_parameters()]
         shards_weights = receive_dict(src, store, param_names, group)
-        self.model.load_shards_weights(shard_ids,shards_weights)
-        logger.info(f"Receive shards: {shard_ids} from rank: {src}")
+        return shards_weights
 
     def initialize_sharded_model(self, shard_ids: List[int]):
         with set_default_torch_dtype(self.model_config.dtype):
