@@ -262,6 +262,12 @@ class XFormersImpl(AttentionImpl[XFormersMetadata]):
         index = self.shard_ids.index(shard_id)
         self.shard_ids.pop(index)
 
+    def append_shard(self, shard_id: int):
+        assert shard_id not in self.shard_ids
+        self.num_heads += self.num_kv_heads_per_shard
+        self.num_kv_heads += self.num_kv_heads_per_shard
+        self.shard_ids.append(shard_id)
+
 
     def forward(
         self,

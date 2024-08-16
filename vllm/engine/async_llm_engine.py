@@ -5,6 +5,7 @@ from typing import (AsyncIterator, Callable, Dict, Iterable, List, Optional,
                     Set, Tuple, Type, Union)
 
 from transformers import PreTrainedTokenizer
+import threading
 
 import vllm.envs as envs
 from vllm.config import DecodingConfig, ModelConfig
@@ -220,7 +221,8 @@ class _AsyncLLMEngine(LLMEngine):
         and updates the scheduler with the model outputs. Finally, it decodes
         the sequences and returns the newly generated results.
         """
-        self.check_liquid_request_and_complete()
+        with self.execution_lock:
+            self.check_liquid_request_and_complete()
         seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
 
         if not scheduler_outputs.is_empty():

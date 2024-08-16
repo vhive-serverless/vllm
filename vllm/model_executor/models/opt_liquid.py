@@ -17,7 +17,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only OPT model compatible with HuggingFace weights."""
-from typing import Iterable, List, Optional, Tuple, Dict
+from typing import Iterable, List, Optional, Tuple, Dict, Iterator
 
 import torch
 from torch import nn
@@ -41,6 +41,7 @@ from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.sequence import SamplerOutput
 from vllm.config import LiquidConfig
+
 
 
 class OPTLearnedPositionalEmbedding(nn.Embedding):
@@ -352,6 +353,12 @@ class OPTForCausalLM(nn.Module):
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 
+    def named_sharded_parameters(self):
+        for name, param in self.named_parameters():
+            if hasattr(param, "shard_ids"):
+                yield name, param
+
+
     def get_shards_weights(self, shard_ids: List[int], only_sharded: bool = True) -> Dict[str, torch.Tensor]:
         results = {}
         if len(shard_ids) > 1:
@@ -360,7 +367,7 @@ class OPTForCausalLM(nn.Module):
         shard_id = shard_ids[0]
         assert shard_id in self.shard_ids, f"{shard_id} not in the model"
         for name, param in self.named_parameters():
-            if hasattr(param, "num_shards"):
+            if hasattr(param, "shard_ids"):
                 results[name] = param.get_shard(shard_id)
             else:
                 if not only_sharded:
@@ -393,6 +400,22 @@ class OPTForCausalLM(nn.Module):
         for name, param in self.named_parameters():
             if name in shards_weights.keys():
                 param.data.copy_(shards_weights[name])
+
+    def append_shards_weights(self, shard_ids: List[int], shards_weights: Dict[str, torch.Tensor]):
+        if len(shard_ids) > 1:
+            raise NotImplementedError(f"load shards with length of {len(shard_ids)} is not implemented yet!")
+        shard_id = shard_ids[0]
+        assert shard_id not in self.shard_ids, f"{shard_id} already in the model"
+        for name, param in self.named_parameters():
+            if name in shards_weights.keys():
+                assert hasattr(param, "shard_ids")
+                param.append_shard(shard_id, shards_weights[name])
+
+        
+        for layer in self.model.decoder.layers:
+            layer.self_attn.attn.append_shard(shard_id)
+
+        self.shard_ids.append(shard_id)
 
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):

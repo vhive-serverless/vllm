@@ -9,7 +9,7 @@ from vllm.logger import init_logger
 from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, is_pin_memory_available
 from vllm.liquid.sharded_tensor import ShardedTensor
 from vllm.liquid.utils import send_dict, receive_dict
-from vllm.distributed.communication_op import get_tcp_store, get_tensor_model_parallel_group, get_tensor_model_parallel_cpu_group
+from vllm.distributed.communication_op import get_tcp_store, get_device_world_group,get_tensor_model_parallel_group, get_tensor_model_parallel_cpu_group
 
 logger = init_logger(__name__)
 
@@ -91,18 +91,18 @@ class CacheEngine:
         shards_cache = self.get_shards(shard_ids)
         # print(f"sharded_weights.keys: {shards_weights.keys()}")
         store = get_tcp_store()
-        group = get_tensor_model_parallel_group()
+        group = get_device_world_group()
         send_dict(shards_cache, dst, store, group)
         self.delete_shards(shard_ids)
-        logger.info(f"Send cache shards: {shard_ids} to rank: {dst}")
+        logger.info(f"Successfully send kv cache shards: {shard_ids} to rank: {dst}")
 
     def recv_shards(self, shard_ids: List[int], src: int):
         store = get_tcp_store()
-        group = get_tensor_model_parallel_group()
+        group = get_device_world_group()
         tensor_names = [f"layer_{i}" for i in range(len(self.gpu_cache))]
         shards_cache = receive_dict(src, store, tensor_names, group)
-        self.load_shards(shard_ids,shards_cache)
-        logger.info(f"Receive shards cache: {shard_ids} from rank: {src}")
+        return shards_cache
+        
 
     def get_shards(self, shard_ids: List[int]) -> Dict[str,torch.Tensor]:
         if len(shard_ids) > 1:
@@ -120,8 +120,9 @@ class CacheEngine:
         shard_id = shard_ids[0]
         for cache in self.gpu_cache:
             cache.delete_shard(shard_id) 
-        for cache in self.cpu_cache:
-            cache.delete_shard(shard_id)
+        # TODO: handle cpu cache
+        # for cache in self.cpu_cache:
+        #     cache.delete_shard(shard_id)
 
         index = self.shard_ids.index(shard_id)
         self.shard_ids.pop(index)
@@ -133,6 +134,16 @@ class CacheEngine:
         assert shard_id in self.shard_ids
         for i, cache in enumerate(self.gpu_cache):
             cache.copy_(shards_data[f"layer_{i}"])
+
+    def append_shards(self,shard_ids: List[int], shards_data: Dict[str, torch.Tensor]):
+        if len(shard_ids) > 1:
+            raise NotImplementedError(f"get shard with length > 1 is not implemented yet")
+        shard_id = shard_ids[0]
+        assert shard_id not in self.shard_ids, f"shard {shard_id} already in cache tensors: {self.shard_ids}"
+        for i, cache in enumerate(self.gpu_cache):
+            cache.append_shard(shard_id, shards_data[f"layer_{i}"])
+
+        self.shard_ids.append(shard_id)
 
 
     def swap_in(self, src_to_dst: torch.Tensor) -> None:

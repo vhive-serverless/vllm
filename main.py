@@ -1,5 +1,6 @@
 from vllm import LLM, SamplingParams
 from vllm.engine.async_llm_engine import AsyncLLMEngine, AsyncEngineArgs
+from vllm import EngineArgs, LLMEngine
 import asyncio
 
 import os
@@ -7,8 +8,8 @@ import os
 model = "facebook/opt-125m"
 # model_path = os.path.join("./models", model)
 
-async def main():
-    engine_args = AsyncEngineArgs(
+def main():
+    llm = LLM(
         model, 
         enforce_eager=True,
         load_format="auto",
@@ -18,28 +19,22 @@ async def main():
         liquid_total_num_shards = 4,
         gpu_memory_utilization=0.3
     )
-    async_engine = AsyncLLMEngine.from_engine_args(engine_args=engine_args)
-
-    async_engine.start_background_loop()
-
-    sampling_params = SamplingParams(temperature=0)
-    results_generators = []
-    request_num = 10
-    for request_id in range(request_num):
-        results_generators.append(async_engine.generate(f"What is LLM?", sampling_params=sampling_params, request_id=f"{request_id}"))
-
     shard_ids = [3]
     src = 0
     dst = 1
-    async_engine.do_liquid(shard_ids, src, dst)
+    llm.do_liquid(shard_ids, src, dst)
+    llm.do_liquid(shard_ids, dst, src)
+    llm.do_liquid(shard_ids, src, dst)
 
-    for results_generator in results_generators:
-        final_output = None
-        async for output in results_generator:
-            final_output = output
+    sampling_params = SamplingParams(temperature=0)
+    request_num = 10
+    for request_id in range(request_num):
+        # results_generators.append(async_engine.generate(f"What is LLM?", sampling_params=sampling_params, request_id=f"{request_id}"))
+        output = llm.generate(f"What is LLM?", sampling_params=sampling_params)
+        print(output[0].outputs[0].text)
 
-        print(f"output for request_id: [{final_output.request_id}]: {final_output.outputs[0].text}")
+
         
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()

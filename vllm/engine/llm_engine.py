@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, ClassVar, Iterable, List, Optional
 from typing import Sequence as GenericSequence
 from typing import Type, TypeVar, Union
 from queue import Queue
+import threading
 
 from transformers import GenerationConfig, PreTrainedTokenizer
 
@@ -214,7 +215,8 @@ class LLMEngine:
         self.metrics_record = metrics_record
         self.log_stats = log_stats
         self.liquid_config = liquid_config
-        self.liquid_request_queue: Queue[LiquidRequest] = Queue()
+        self.liquid_request_queue: Queue[LiquidRequest] = Queue() 
+        self.execution_lock: threading.Lock = threading.Lock()
 
         if not self.model_config.skip_tokenizer_init:
             self.tokenizer = self._init_tokenizer()
@@ -733,6 +735,7 @@ class LLMEngine:
         if self.liquid_request_queue.qsize() != 0:
             liquid_request = self.liquid_request_queue.get()
             try:
+                logger.info(f"Start do liquid from src: {liquid_request.src} to dst: {liquid_request.dst}")
                 liquid_output = self._do_liquid(liquid_request)
                 logger.info(f"{liquid_output}")
             except Exception as e:

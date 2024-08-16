@@ -1,7 +1,7 @@
 import asyncio
 import os
 from functools import partial
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Dict, Set
 
 from vllm.executor.distributed_gpu_executor import (  # yapf: disable
     DistributedGPUExecutor, DistributedGPUExecutorAsync)
@@ -12,6 +12,7 @@ from vllm.sequence import ExecuteModelRequest, SamplerOutput
 from vllm.utils import (get_distributed_init_method, get_ip, get_open_port,
                         get_vllm_instance_id, make_async)
 from vllm.liquid.request import LiquidRequest, LiquidOutput
+from vllm.liquid.liquid_worker_info import LiquidWorkerInfo
 
 logger = init_logger(__name__)
 
@@ -82,18 +83,63 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
                           max_parallel_loading_workers,
                           only_active_workers=True,
                           )
+        self.rank_worker_info_map: Dict[int, LiquidWorkerInfo] = {}       
+        driver_worker_info = LiquidWorkerInfo(
+            worker=self.driver_worker, 
+            rank=0,
+            shard_ids=list(range(self.liquid_config.liquid_total_num_shards)),
+            is_active=True,
+            initialized=True,
+        )
+        self.rank_worker_info_map[0] = driver_worker_info
+        for rank in range(1, worker_num):
+            self.rank_worker_info_map[rank] = LiquidWorkerInfo(
+                worker=self.workers[rank-1],
+                rank=rank,
+                shard_ids=[],
+                is_active=False,
+                initialized=False,
+            )
+
+    def update_worker_info_map(self, src: int, dst: int, liquid_shard_ids: List[int]) -> bool:
+        """Updates the worker info map, returns True if there are group memeber change(active->inactive or vice versa)
+        """
+        src_shard_ids = self.rank_worker_info_map[src].shard_ids
+        dst_shard_ids = self.rank_worker_info_map[dst].shard_ids
+        group_member_change: bool = False
+        if len(dst_shard_ids) == 0:
+            assert self.rank_worker_info_map[dst].is_active == False
+            group_member_change = True
+            self.rank_worker_info_map[dst].set_active(True)
+
+        assert set(liquid_shard_ids).issubset(src_shard_ids), f"{liquid_shard_ids} is not a subset of {src_shard_ids}!"
+        for shard_id in liquid_shard_ids:
+            src_shard_ids.remove(shard_id)
+            dst_shard_ids.add(shard_id)
+
+        if src == 0:
+            assert len(src_shard_ids) > 0, f"Driver worker must have at least one shard!"
+            return group_member_change
+
+        if len(src_shard_ids) == 0:
+            assert self.rank_worker_info_map[src].is_active == True
+            group_member_change = True
+            self.rank_worker_info_map[src].set_active(False)
+
+        return group_member_change
+
+
+
+
     def get_active_ranks(self) -> List[int]:
-        active_ranks = [0]
-        for i, worker in enumerate(self.workers):
-            if worker.is_active:
-                rank = i+1
+        active_ranks = []
+        for rank, worker_info in self.rank_worker_info_map.items():
+            if worker_info.is_active:
                 active_ranks.append(rank)
         return active_ranks
 
     def get_worker_by_rank(self, rank: int):
-        assert rank != 0
-        index = rank - 1
-        return self.workers[index]
+        return self.rank_worker_info_map[rank].worker
 
     def do_liquid(self, liquid_request: LiquidRequest) -> LiquidOutput:
         shard_ids = liquid_request.shard_ids
@@ -102,16 +148,17 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         liquid_output = LiquidOutput(shard_ids, src, dst)
         # check if the src is active
         active_ranks = self.get_active_ranks()
-        assert dst > 0 and dst < len(self.workers)+1, f"liquid dst: {dst} should be in the range between 1 and {len(self.workers)+1}"
         assert src in active_ranks, f"liquid src: {src} is not active!"
-        # check if dst is active, if not, we need to update the distributed group
-        if dst not in active_ranks:
-            self.workers[dst-1].is_active = True
+
+        group_member_change = self.update_worker_info_map(src, dst, shard_ids)
+        if group_member_change:
             active_ranks = self.get_active_ranks()
             self.update_active_ranks(active_ranks)
         
         # load the shard data(model weights) in liquid mode
-        self._run_workers("liquid_model_weights", shard_ids=shard_ids, src=src, dst=dst, worker_ranks=[src, dst])
+        # if the worker has not been initialized before, send all tensor from the src, if has, only send sharded tensor
+        only_send_sharded_weights = self.rank_worker_info_map[dst].initialized 
+        self._run_workers("liquid_model_weights", shard_ids=shard_ids, src=src, dst=dst, only_send_sharded_weights=only_send_sharded_weights, worker_ranks=[src, dst])
         # update the cache engine on dst
         # TODO: recalculates the number of gpu blocks and cpu blocks, currently just keep the same number
         num_gpu_blocks = self.cache_config.num_gpu_blocks
@@ -121,11 +168,16 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
                           num_cpu_blocks=num_cpu_blocks, 
                           shard_ids = shard_ids,
                           worker_ranks=[src, dst])
-        self._run_workers("liquid_kv_cache", shard_ids=shard_ids, src=src, dst=dst, worker_ranks=[src, dst])
+        # if dst has not initialize, then kv cache should be loaded, otherwise it should be appended
+        load_kv_cache = not self.rank_worker_info_map[dst].initialized
+        self._run_workers("liquid_kv_cache", shard_ids=shard_ids, src=src, dst=dst, load_kv_cache = load_kv_cache, worker_ranks=[src, dst])
+
+        self.rank_worker_info_map[dst].initialized = True
          
         return liquid_output
 
     def update_active_ranks(self,active_ranks: List[int]):
+        self.stop_remote_worker_execution_loop()
         self._run_workers("update_active_ranks", active_ranks=active_ranks, only_active_workers=False)
 
     def shutdown(self):
@@ -145,6 +197,24 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         """
         return self.driver_worker.execute_model(
             execute_model_req=execute_model_req)
+
+    def _run_worker(
+        self,
+        method: str,
+        * args,
+        rank: int,
+        **kwargs,
+    ) -> Any:
+        """Runs the given method on one worker
+        """
+        if rank == 0:
+            driver_worker_method = getattr(self.driver_worker, method)
+            driver_worker_output = driver_worker_method(*args, **kwargs)
+            return driver_worker_output
+        else:
+            worker = self.get_worker_by_rank(rank)
+            output = worker.execute_method(method, *args, **kwargs)
+            return output.get()
 
     def _run_workers(
         self,
