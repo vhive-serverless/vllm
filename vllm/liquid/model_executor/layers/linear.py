@@ -312,7 +312,7 @@ class ColumnParallelLinear(LinearBase):
             param_class=param_class,
         )
         if bias:
-            self.bias = ShardedParameter(
+            self.bias = param_class(
                 torch.empty(self.output_size_per_partition,
                             dtype=params_dtype),
                 num_shards=len(shard_ids),

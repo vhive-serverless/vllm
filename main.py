@@ -13,6 +13,7 @@ def main():
         model, 
         enforce_eager=True,
         load_format="auto",
+        # tensor_parallel_size=2,
         liquid_gpu_range = [0,1],
         liquid_gpu_space = 32,
         liquid_driver_gpu_id = 0, 
@@ -23,13 +24,12 @@ def main():
     src = 0
     dst = 1
     llm.do_liquid(shard_ids, src, dst)
-    llm.do_liquid(shard_ids, dst, src)
-    llm.do_liquid(shard_ids, src, dst)
+    # llm.do_liquid(shard_ids, dst, src)
+    # llm.do_liquid(shard_ids, src, dst)
 
     sampling_params = SamplingParams(temperature=0)
     request_num = 10
     for request_id in range(request_num):
-        # results_generators.append(async_engine.generate(f"What is LLM?", sampling_params=sampling_params, request_id=f"{request_id}"))
         output = llm.generate(f"What is LLM?", sampling_params=sampling_params)
         print(output[0].outputs[0].text)
 

@@ -84,22 +84,23 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
                           only_active_workers=True,
                           )
         self.rank_worker_info_map: Dict[int, LiquidWorkerInfo] = {}       
-        driver_worker_info = LiquidWorkerInfo(
-            worker=self.driver_worker, 
-            rank=0,
-            shard_ids=list(range(self.liquid_config.liquid_total_num_shards)),
-            is_active=True,
-            initialized=True,
-        )
-        self.rank_worker_info_map[0] = driver_worker_info
-        for rank in range(1, worker_num):
-            self.rank_worker_info_map[rank] = LiquidWorkerInfo(
-                worker=self.workers[rank-1],
-                rank=rank,
-                shard_ids=[],
-                is_active=False,
-                initialized=False,
+        if self.liquid_config is not None:
+            driver_worker_info = LiquidWorkerInfo(
+                worker=self.driver_worker, 
+                rank=0,
+                shard_ids=list(range(self.liquid_config.liquid_total_num_shards)),
+                is_active=True,
+                initialized=True,
             )
+            self.rank_worker_info_map[0] = driver_worker_info
+            for rank in range(1, worker_num):
+                self.rank_worker_info_map[rank] = LiquidWorkerInfo(
+                    worker=self.workers[rank-1],
+                    rank=rank,
+                    shard_ids=[],
+                    is_active=False,
+                    initialized=False,
+                )
 
     def update_worker_info_map(self, src: int, dst: int, liquid_shard_ids: List[int]) -> bool:
         """Updates the worker info map, returns True if there are group memeber change(active->inactive or vice versa)

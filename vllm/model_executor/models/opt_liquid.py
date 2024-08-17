@@ -327,6 +327,8 @@ class OPTForCausalLM(nn.Module):
         self.lm_head_weight = self.model.decoder.embed_tokens.weight
         self.logits_processor = LogitsProcessor(config.vocab_size)
         self.sampler = Sampler()
+        if self.liquid_config is not None:
+            self.total_num_shards = self.liquid_config.liquid_total_num_shards
 
     def forward(
         self,
@@ -390,6 +392,7 @@ class OPTForCausalLM(nn.Module):
         
         index = self.shard_ids.index(shard_id)
         self.shard_ids.pop(index)
+        self.model.decoder.embed_tokens.update_sharded_indices(shard_ids=self.shard_ids, total_num_shards=self.total_num_shards)
                 
 
     def load_shards_weights(self, shard_ids: List[int], shards_weights: Dict[str, torch.Tensor]):
@@ -400,6 +403,8 @@ class OPTForCausalLM(nn.Module):
         for name, param in self.named_parameters():
             if name in shards_weights.keys():
                 param.data.copy_(shards_weights[name])
+
+        self.model.decoder.embed_tokens.update_sharded_indices(shard_ids=self.shard_ids, total_num_shards=self.total_num_shards)
 
     def append_shards_weights(self, shard_ids: List[int], shards_weights: Dict[str, torch.Tensor]):
         if len(shard_ids) > 1:
@@ -416,6 +421,7 @@ class OPTForCausalLM(nn.Module):
             layer.self_attn.attn.append_shard(shard_id)
 
         self.shard_ids.append(shard_id)
+        self.model.decoder.embed_tokens.update_sharded_indices(shard_ids=self.shard_ids, total_num_shards=self.total_num_shards)
 
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):

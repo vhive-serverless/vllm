@@ -1,0 +1,3 @@
+(VllmWorkerProcess pid=860989) tensor([ 1.7651e-01, -6.3477e-02, -3.6133e-02,  ..., -8.9288e-05,
+(VllmWorkerProcess pid=860989)          1.0214e-03,  5.6610e-03], device='cuda:1', dtype=torch.float16,
+(VllmWorkerProcess pid=860989)        requires_grad=True)

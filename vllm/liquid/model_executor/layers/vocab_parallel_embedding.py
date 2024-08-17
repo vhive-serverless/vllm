@@ -38,6 +38,20 @@ def vocab_range_from_global_vocab_size(global_vocab_size: int,
                                                      rank,
                                                      offset=offset)
 
+def sharded_vocab_range_from_global_vocab_size(global_vocab_size: int,
+                                                shard_ids: List[int],
+                                                total_num_shards: int,
+                                                offset: int=0
+                                               ) -> Sequence[int]:
+    per_partition_vocab_size = divide(global_vocab_size, total_num_shards)
+    shard_f = min(shard_ids)
+    shard_l = shard_f + len(shard_ids)
+    index_f = shard_f * per_partition_vocab_size
+    
+    index_l = shard_l * per_partition_vocab_size 
+    return index_f + offset, index_l + offset
+    
+
 
 @dataclass
 class VocabParallelEmbeddingShardIndices:
@@ -140,12 +154,12 @@ class VocabParallelEmbedding(torch.nn.Module):
     Therefore, the tensor format looks like the following:
     TP1, rank 0 (no sharding):
                             |< --------BASE-------- >|< -BASE PADDING-- >|< -----LORA------ >|< -LORA PADDING-- >|
-    corresponding token_id: |  0  |  1  | ... | 1009 |  -1  | ... |  -1  | 1010 | ... | 1015 |  -1  | ... |  -1  |
+    corresponding token_id: |  0  |  1  | ... | 1009 |  -1  | ... |  -1  | 1010 | ... | 1025 |  -1  | ... |  -1  |
                      index: |  0  |  1  | ... | 1009 | 1010 | ... | 1023 | 1024 | ... | 1039 | 1040 | ... | 1087 |
 
     TP2, rank 0:
                             |< --------------------BASE--------------------- >|< -----LORA------ >|< -LORA PADDING- >|
-    corresponding token_id: |  0  |  1  |  2  | ... | 497  | 498 | ...  | 511 | 1000 | ... | 1015 |  -1  | ... |  -1 |
+    corresponding token_id: |  0  |  1  |  2  | ... | 497  | 498 | ...  | 511 | 1010 | ... | 1025 |  -1  | ... |  -1 |
                      index: |  0  |  1  |  2  | ... | 497  | 498 | ...  | 511 | 512  | ... | 527  |  520 | ... | 543 |
     TP2, rank 1:
                             |< -----------BASE----------- >|< -BASE PADDING- >|< -----------LORA PADDING----------- >|
@@ -247,6 +261,31 @@ class VocabParallelEmbedding(torch.nn.Module):
             org_vocab_start_index, org_vocab_end_index,
             added_vocab_start_index, added_vocab_end_index)
 
+    def update_sharded_indices(self, shard_ids: List[int], total_num_shards: int):
+        self.tp_size = get_tensor_model_parallel_world_size()
+        if len(shard_ids) == 0: return
+        num_added_embeddings_padded = self.num_embeddings_padded - self.org_vocab_size_padded
+        padded_org_vocab_start_index, padded_org_vocab_end_index = (
+            sharded_vocab_range_from_global_vocab_size(self.org_vocab_size_padded, shard_ids, total_num_shards)
+        )
+        padded_added_vocab_start_index, padded_added_vocab_end_index = (
+            sharded_vocab_range_from_global_vocab_size(num_added_embeddings_padded,
+                                               shard_ids,
+                                               total_num_shards,
+                                               offset=self.org_vocab_size))
+
+        org_vocab_start_index = min(padded_org_vocab_start_index,
+                                    self.org_vocab_size)
+        org_vocab_end_index = min(padded_org_vocab_end_index, self.org_vocab_size)
+        added_vocab_start_index = min(padded_added_vocab_start_index,
+                                      self.num_embeddings)
+        added_vocab_end_index = min(padded_added_vocab_end_index, self.num_embeddings)
+        self.shard_indices = VocabParallelEmbeddingShardIndices(
+            padded_org_vocab_start_index, padded_org_vocab_end_index,
+            padded_added_vocab_start_index, padded_added_vocab_end_index,
+            org_vocab_start_index, org_vocab_end_index,
+            added_vocab_start_index, added_vocab_end_index)
+
     def get_sharded_to_full_mapping(self) -> Optional[List[int]]:
         """Get a mapping that can be used to reindex the gathered
         logits for sampling.
@@ -304,7 +343,6 @@ class VocabParallelEmbedding(torch.nn.Module):
         param[loaded_weight.shape[0]:].data.fill_(0)
 
     def forward(self, input_):
-        self.tp_size = get_tensor_model_parallel_world_size()
         if self.tp_size > 1:
             # Build the mask.
             masked_input, input_mask = get_masked_input_and_mask(
@@ -316,6 +354,7 @@ class VocabParallelEmbedding(torch.nn.Module):
         else:
             masked_input = input_
             # Get the embeddings.
+        # print(f"min of input: {masked_input.min()}, max of input: {masked_input.max()}, embedding shape: {self.weight.shape}")
         output_parallel = F.embedding(masked_input, self.weight)
         # Mask the output embedding.
         if self.tp_size > 1:
