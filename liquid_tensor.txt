@@ -1,0 +1,3 @@
+(VllmWorkerProcess pid=859092) Parameter(ShardedParameter([-1.2830e-01, -7.2327e-02,  1.1395e-01,  ...,
+(VllmWorkerProcess pid=859092)                   -8.9288e-05,  1.0214e-03,  5.6610e-03], device='cuda:1',
+(VllmWorkerProcess pid=859092)                  dtype=torch.float16, requires_grad=True))
