@@ -52,6 +52,7 @@ class CacheEngine:
             self.dtype = STR_DTYPE_TO_TORCH_DTYPE[cache_config.cache_dtype]
 
         # Get attention backend.
+        is_liquid = (total_num_shards!=1)
         self.attn_backend = get_attn_backend(
             model_config.get_num_attention_heads(parallel_config),
             self.head_size,
@@ -60,6 +61,7 @@ class CacheEngine:
             model_config.dtype,
             cache_config.cache_dtype,
             self.block_size,
+            is_liquid=is_liquid,
         )
 
         # Initialize the cache.
@@ -80,10 +82,17 @@ class CacheEngine:
             # null block in CpuGpuBlockAllocator requires at least that
             # block to be zeroed-out.
             # We zero-out everything for simplicity.
-            cache = ShardedTensor(torch.zeros(kv_cache_shape,
-                        dtype=self.dtype,
-                        pin_memory=pin_memory,
-                        device=device).view(2, num_blocks, self.num_kv_heads, self.head_size, self.block_size), shard_ids=self.shard_ids,num_shards=len(self.shard_ids), shard_dim=2)
+            if self.total_num_shards > 1:
+                shard_dim = self.attn_backend.get_shard_dim()
+                cache = ShardedTensor(torch.zeros(kv_cache_shape,
+                            dtype=self.dtype,
+                            pin_memory=pin_memory,
+                            device=device), shard_ids=self.shard_ids,num_shards=len(self.shard_ids), shard_dim=shard_dim)
+            else:
+                cache = torch.zeros(kv_cache_shape,
+                            dtype=self.dtype,
+                            pin_memory=pin_memory,
+                            device=device)
             kv_cache.append(cache)
         return kv_cache
 

@@ -71,15 +71,11 @@ class Attention(nn.Module):
         # During model initialization, the default dtype is set as the model
         # weight and activation dtype.
         dtype = torch.get_default_dtype()
-        if total_num_shards == 1:
-            attn_backend = get_attn_backend(num_heads, head_size, num_kv_heads,
+        is_liquid = (total_num_shards != 1)
+        attn_backend = get_attn_backend(num_heads, head_size, num_kv_heads,
                                             sliding_window, dtype, kv_cache_dtype,
                                             block_size, blocksparse_params
-                                            is not None)
-        else:
-            from vllm.attention.backends.xformers_liquid import (  # noqa: F401
-                XFormersBackend)
-            attn_backend = XFormersBackend
+                                            is not None, is_liquid)
         impl_cls = attn_backend.get_impl_cls()
         if total_num_shards == 1:
             self.impl = impl_cls(num_heads, head_size, scale, num_kv_heads,
