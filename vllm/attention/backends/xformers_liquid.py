@@ -38,8 +38,13 @@ class XFormersBackend(AttentionBackend):
         num_kv_heads: int,
         head_size: int,
     ) -> Tuple[int, ...]:
-        return PagedAttention.get_kv_cache_shape(num_blocks, block_size,
-                                                 num_kv_heads, head_size)
+        # return PagedAttention.get_kv_cache_shape(num_blocks, block_size,
+        #                                          num_kv_heads, head_size)
+        return (2, num_blocks, num_kv_heads, head_size, block_size)
+
+    @staticmethod
+    def get_shard_dim():
+        return 2
 
     @staticmethod
     def swap_blocks(
