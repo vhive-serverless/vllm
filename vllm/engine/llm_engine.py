@@ -735,7 +735,6 @@ class LLMEngine:
         if self.liquid_request_queue.qsize() != 0:
             liquid_request = self.liquid_request_queue.get()
             try:
-                logger.info(f"Start do liquid from src: {liquid_request.src} to dst: {liquid_request.dst}")
                 liquid_output = self._do_liquid(liquid_request)
                 logger.info(f"{liquid_output}")
             except Exception as e:

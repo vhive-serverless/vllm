@@ -17,10 +17,10 @@ def main():
         liquid_gpu_range = [0,1],
         liquid_gpu_space = 32,
         liquid_driver_gpu_id = 0, 
-        liquid_total_num_shards = 4,
+        liquid_total_num_shards = 2,
         gpu_memory_utilization=0.3
     )
-    shard_ids = [3]
+    shard_ids = [1]
     src = 0
     dst = 1
     llm.do_liquid(shard_ids, src, dst)

@@ -150,6 +150,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         # check if the src is active
         active_ranks = self.get_active_ranks()
         assert src in active_ranks, f"liquid src: {src} is not active!"
+        logger.info(f"Start to do liquid from src: {src} to dst: {dst} with shard_ids: {shard_ids}")
 
         group_member_change = self.update_worker_info_map(src, dst, shard_ids)
         if group_member_change:
@@ -164,11 +165,15 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         # TODO: recalculates the number of gpu blocks and cpu blocks, currently just keep the same number
         num_gpu_blocks = self.cache_config.num_gpu_blocks
         num_cpu_blocks = self.cache_config.num_cpu_blocks
+        import time
+        start = time.time()
         self._run_workers("update_cache",
                           num_gpu_blocks=num_gpu_blocks,
                           num_cpu_blocks=num_cpu_blocks, 
                           shard_ids = shard_ids,
                           worker_ranks=[src, dst])
+        initialize_mem_latency = time.time() - start
+        logger.info(f"Intiialize mem latency: {initialize_mem_latency:.2f}s")
         # if dst has not initialize, then kv cache should be loaded, otherwise it should be appended
         load_kv_cache = not self.rank_worker_info_map[dst].initialized
         self._run_workers("liquid_kv_cache", shard_ids=shard_ids, src=src, dst=dst, load_kv_cache = load_kv_cache, worker_ranks=[src, dst])
