@@ -3,45 +3,83 @@ import torch.distributed as dist
 import multiprocessing as mp
 from utils import send_dict, receive_dict
 import time
+from profiler import CudaMemoryProfiler
+from liquid_communicator import LiquidCommunicator
 
 TCP_PORT = 12344
 TCP_STORE_PORT = 12345
+dtype = torch.float16
+buffer_size_gb = 1
 
 def main_send():
-    # Initialize the process group for distributed communication
-    torch.cuda.set_device(0)
-    dist.init_process_group(backend='nccl', init_method=f'tcp://localhost:{TCP_PORT}', world_size=2, rank=0)
+    try:
+        # Initialize the process group for distributed communication
+        torch.cuda.set_device(0)
+        group = dist.init_process_group(backend='nccl', init_method=f'tcp://localhost:{TCP_PORT}', world_size=2, rank=0)
 
-    # Allocate 10 tensors, each of 1GB on GPU
-    tensor_dict = {f'tensor_{i}': torch.empty(int(1 * 1024**3 / 4), dtype=torch.float16, device='cuda') for i in range(10)}
+        # Allocate 10 tensors, each of 1GB on GPU
+        tensor_size = 1
+        tensor_length = int(tensor_size * (1024**3) / torch.finfo(dtype).bits * 8)  # Calculate number of elements
+        tensor_dict = {f'tensor_{i}': torch.rand(tensor_length, dtype=dtype, device='cuda') for i in range(10)}
 
-    # Create a TCPStore
-    store = dist.TCPStore("localhost", TCP_STORE_PORT, world_size=2, is_master=True)
+        # Create a TCPStore
+        # store = dist.TCPStore("localhost", TCP_STORE_PORT, world_size=2, is_master=True)
+        comm = LiquidCommunicator(
+            buffer_size_gb=buffer_size_gb,
+            group=group,
+            tcp_store_port=TCP_STORE_PORT,
+            dtype=dtype,
+        )
 
-    # Send the tensor dictionary to another GPU
-    dist.barrier()
-    start = time.time()
-    send_dict(tensor_dict, dst_rank=1, store=store)
-    dist.barrier()
-    latency = time.time() - start
-    bw = 10 / latency
-    print(f"Send dict finished, latency: {latency:.2f}s, bandwidth: {bw:.1f}GB/s")
+        # Send the tensor dictionary to another GPU
+        dist.barrier()
+        start = time.time()
+        with CudaMemoryProfiler(interval=0.1,cuda_index=0) as m:
+            comm.send_dict(tensor_dict, dst_rank=1)
+            # send_dict(tensor_dict, dst_rank=1, store=store)
+        dist.barrier()
+        latency = time.time() - start
+        bw = 10 * tensor_size / latency
+        print(f"Send dict finished, latency: {latency:.2f}s, bandwidth: {bw:.1f}GB/s")
+        mem_records = m.get_memory_records()
+        print(f"Peak memory during sending: {max(mem_records):.1f}GB")
+
+
+        received_dict = comm.recv_dict(src_rank=1, keys=list(tensor_dict.keys()))
+        assert received_dict.keys() == tensor_dict.keys()
+        for key, tensor in tensor_dict.items():
+            assert received_dict[key].allclose(tensor)
+
+    except KeyboardInterrupt:
+        print(f"Send process terminated")
 
 def main_receive():
     # Initialize the process group for distributed communication
     torch.cuda.set_device(1)
-    dist.init_process_group(backend='nccl', init_method=f'tcp://localhost:{TCP_PORT}', world_size=2, rank=1)
+    group=dist.init_process_group(backend='nccl', init_method=f'tcp://localhost:{TCP_PORT}', world_size=2, rank=1)
+    # store = dist.TCPStore("localhost", TCP_STORE_PORT, world_size=2, is_master=False)
 
     # Define the keys of the tensors you expect to receive
     keys = [f'tensor_{i}' for i in range(10)]
 
     # Create a TCPStore
-    store = dist.TCPStore("localhost", TCP_STORE_PORT, world_size=2, is_master=False)
+    comm = LiquidCommunicator(
+        buffer_size_gb=buffer_size_gb,
+        group=group,
+        tcp_store_port=TCP_STORE_PORT,
+        dtype=dtype
+    )
 
     # Receive the tensor dictionary from another GPU
     dist.barrier()
-    received_dict = receive_dict(src_rank=0, store=store, keys=keys)
+    with CudaMemoryProfiler(interval=0.01, cuda_index=1) as m:
+        # receive_dict(src_rank=0, store=store, keys=keys, group=group)
+        received_dict = comm.recv_dict(src_rank=0, keys=keys)
     dist.barrier()
+    mem_records = m.get_memory_records()
+    print(f"Peak memory during recving: {max(mem_records):.1f}GB")
+
+    comm.send_dict(received_dict, 0) 
 
 if __name__ == "__main__":
     # Create two processes for send and receive
