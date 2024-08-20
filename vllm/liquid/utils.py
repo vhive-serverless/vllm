@@ -30,15 +30,19 @@ def send_dict(tensor_dict: Dict[str, torch.Tensor], dst_rank: int, store: Any, g
     start = time.time()
     meta_data, data_tensor = _encode_dict_to_tensors(tensor_dict, dtype)
     latency = time.time() - start
-    print(f"encode latency: {latency:.2f} s, data_tensor: {data_tensor}")
+    print(f"encode latency: {latency:.2f} s")
     
     # Store meta data in TCPStore
     start = time.time()
     _store_meta_data(meta_data, store)
     latency = time.time() - start
     print(f"store latency: {latency:.2f} s")
-    
+
+    dist.barrier() 
+    start = time.time()
     dist.send(data_tensor, dst=dst_rank, group=group)
+    dist.barrier()
+    print(f"sending latency: {time.time() - start:.2f}s")
 
 # Receiver side functions
 def _str_to_dtype(dtype_str):
@@ -108,9 +112,9 @@ def receive_dict(src_rank: int, store: Any, keys: List[str], group = None, dtype
 
     
     # Receive the data tensor
-    # dist.barrier()
+    dist.barrier()
     dist.recv(data_tensor, src=src_rank, group=group)
-    # dist.barrier(group=group)
+    dist.barrier()
 
     start = time.time() 
     tensor_dict = _decode_tensors_to_dict(meta_data, data_tensor)
