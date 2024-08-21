@@ -387,7 +387,6 @@ class OPTForCausalLM(nn.Module):
 
                 # free_memory, total_memory = torch.cuda.mem_get_info()
                 # print(f"Inside opt liquid, param: {name}: There is still {free_memory/(1024**3):.2f} GB")
-                torch.cuda.empty_cache()
                 param.delete_shard(shard_id)
         
 

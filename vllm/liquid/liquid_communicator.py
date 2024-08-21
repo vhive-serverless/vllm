@@ -22,6 +22,7 @@ class LiquidCommunicator:
         # Initialize TCP Store
         self.store = dist.TCPStore("localhost", tcp_store_port, world_size=world_size, is_master=(self.rank == 0))
         self.meta_keys: List[str] = []
+        self._prewarm()
 
     def _send_meta_data(self, tensor_dict: Dict[str, torch.Tensor]):
         offset = 0
@@ -50,11 +51,24 @@ class LiquidCommunicator:
             meta_data_dict[key] = MetaData.from_str(self.store.get(key).decode())
         return total_length, meta_data_dict
 
+    def _prewarm(self):
+        # Only prewarm GPU0 and GPU1
+        pre_warm_size = 1000
+        if self.rank == 0:
+            pre_warm_tensor = torch.randn(pre_warm_size, device='cuda')
+            dist.send(pre_warm_tensor, dst=1, group=self.group)
+            dist.recv(pre_warm_tensor, src=1, group=self.group)
+        elif self.rank == 1:
+            pre_warm_tensor = torch.empty(pre_warm_size, device='cuda')
+            dist.recv(pre_warm_tensor, src=0, group=self.group)
+            dist.send(pre_warm_tensor, dst=0, group=self.group)
+
 
     def send_dict(self, tensor_dict: Dict[str, torch.Tensor], dst_rank: int):
         self._send_meta_data(tensor_dict)
         buffer_start = 0
 
+        start = time.time()
         for key, tensor in tensor_dict.items():
             assert tensor.dtype == self.dtype
             tensor = tensor.flatten()
@@ -79,12 +93,17 @@ class LiquidCommunicator:
         # Send any remaining data in the buffer
         if buffer_start > 0:
             dist.send(tensor=self.buffer[:buffer_start], dst=dst_rank)
+        torch.cuda.synchronize()
+        send_latency = time.time() - start
 
+        start = time.time()
         self._clear_store()
+        print(f"clear store takes: {time.time() - start:.2f} s")
 
 
     def recv_dict(self, src_rank: int, keys: List[str]) -> Dict[str, torch.Tensor]:
         # Retrieve metadata from TCPStore
+        start = time.time()
         total_length, meta_data_dict = self._recv_meta_data(keys)
         received_times = math.ceil(total_length / self.buffer_length)
         remaining_length = total_length % self.buffer_length
@@ -95,6 +114,7 @@ class LiquidCommunicator:
         data_offset = 0
 
         loop_times = received_times - 1 if remaining_length > 0 else received_times
+        start = time.time()
         for i in range(loop_times):
             dist.recv(self.buffer, src=src_rank)
             data_tensor[data_offset:data_offset + self.buffer_length] = self.buffer
@@ -102,11 +122,10 @@ class LiquidCommunicator:
 
         if remaining_length != 0:
             dist.recv(self.buffer[:remaining_length], src=src_rank) 
-
+        torch.cuda.synchronize()
         data_tensor[data_offset:data_offset + remaining_length] = self.buffer[:remaining_length]
 
         tensor_dict = {}
-
         for key, meta_data in meta_data_dict.items():
             offset = meta_data.offset
             length = meta_data.length

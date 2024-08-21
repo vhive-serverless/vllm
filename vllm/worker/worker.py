@@ -26,6 +26,7 @@ from vllm.worker.embedding_model_runner import EmbeddingModelRunner
 from vllm.worker.model_runner import ModelRunner
 from vllm.worker.worker_base import WorkerBase
 from vllm.liquid.utils import send_dict, receive_dict
+import time
 
 
 class Worker(WorkerBase):
@@ -142,16 +143,23 @@ class Worker(WorkerBase):
     def liquid_model_weights(self, shard_ids: List[int], src: int, dst: int, only_send_sharded_weights: bool = False):
         assert self.rank == src or self.rank == dst
         if self.rank == src:
+            start = time.time()
             self.model_runner.send_shards(shard_ids, dst, only_sharded=only_send_sharded_weights)
+            print(f"send shards takes: {time.time() - start:.2f}s")
         else:
             if not hasattr(self.model_runner, "model"):
+                start = time.time()
                 self.model_runner.initialize_sharded_model(shard_ids)
+                print(f"init model takes: {time.time() - start:.2f}s")
+                start = time.time()
                 shards_weights = self.model_runner.recv_shards(shard_ids, src, only_sharded=False)
+                print(f"recv shards takes: {time.time() - start:.2f}s")
+                start = time.time()
                 self.model_runner.model.load_shards_weights(shard_ids,shards_weights)
+                print(f"load shards takes: {time.time() - start:.2f}s")
             else:
                 shards_weights = self.model_runner.recv_shards(shard_ids, src, only_sharded=True)
                 self.model_runner.model.append_shards_weights(shard_ids, shards_weights)
-
             for name, weight in shards_weights.items():
                 del weight
             del shards_weights
@@ -171,7 +179,9 @@ class Worker(WorkerBase):
         if self.rank == src:
             self.cache_engine.send_shards(shard_ids, dst)
         else:
+            start = time.time()
             shards_cache = self.cache_engine.recv_shards(shard_ids, src)
+            start = time.time()
             if load_kv_cache:
                 self.cache_engine.load_shards(shard_ids,shards_cache)
             else:

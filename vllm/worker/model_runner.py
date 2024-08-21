@@ -29,6 +29,7 @@ from vllm.utils import (CudaMemoryProfiler, get_kv_cache_torch_dtype, is_hip,
 from vllm.liquid.utils import send_dict, receive_dict
 from vllm.model_executor.model_loader.utils import (get_model_architecture,
                                                     set_default_torch_dtype)
+import time
 
 logger = init_logger(__name__)
 
@@ -155,11 +156,9 @@ class ModelRunner:
         for name, weights in shards_weights.items():
             del weights
         del shards_weights
-        torch.cuda.empty_cache()
         # del self.model
         self.model.delete_shards(shard_ids)
         # logger.info(f"Successfully send model weights shards: {shard_ids} to rank: {dst}")
-        torch.cuda.empty_cache()
 
     def recv_shards(self, shard_ids: List[int], src: int, only_sharded: bool = False):
         liquid_comm = get_liquid_communicator()
