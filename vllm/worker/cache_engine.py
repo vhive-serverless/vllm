@@ -10,6 +10,7 @@ from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, is_pin_memory_available
 from vllm.liquid.sharded_tensor import ShardedTensor
 from vllm.liquid.utils import send_dict, receive_dict
 from vllm.distributed.communication_op import get_liquid_communicator, get_device_world_group,get_tensor_model_parallel_group, get_tensor_model_parallel_cpu_group
+import time
 
 logger = init_logger(__name__)
 
@@ -104,7 +105,8 @@ class CacheEngine:
         for name, cache in shards_cache.items():
             del cache
         del shards_cache
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
+        start  = time.time()
         self.delete_shards(shard_ids)
         torch.cuda.empty_cache()
         logger.info(f"Successfully send kv cache shards: {shard_ids} to rank: {dst}")

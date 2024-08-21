@@ -174,7 +174,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         # update the cache engine on dst
         # TODO: recalculates the number of gpu blocks and cpu blocks, currently just keep the same number
         num_gpu_blocks = self.cache_config.num_gpu_blocks
-        num_cpu_blocks = 100
+        num_cpu_blocks = 1
         self._run_workers("update_cache",
                           num_gpu_blocks=num_gpu_blocks,
                           num_cpu_blocks=num_cpu_blocks, 

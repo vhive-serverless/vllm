@@ -53,6 +53,7 @@ _CPU_WORLD_GROUP = None
 _PP_GLOBAL_RANKS: Optional[List[int]] = None
 
 _LOCAL_RANK = -1
+import time
 
 
 class ActiveGroupManager:
@@ -68,24 +69,31 @@ class ActiveGroupManager:
 
     def update_active_ranks(self, active_ranks: List[int]):
         # update the active ranks and create groups
+        start = time.time()
         self.active_ranks = active_ranks
         self.destroy_model_parallel()
+        print(f"destory group takes: {time.time() - start:.2f}s")
 
         # whether rank is active, must execute this
+        start = time.time()
         group = torch.distributed.new_group(ranks=active_ranks, backend=self.backend)
         cpu_group = torch.distributed.new_group(ranks=active_ranks, backend="gloo")
+        print(f"create new group takes: {time.time() - start:.2f}s")
         # only active ranks need to execute following steps:
         if self.rank in self.active_ranks:
             self._TP_DEVICE_GROUP = group
             self._TP_CPU_GROUP = cpu_group 
 
+            start = time.time()
             from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
             self._TP_PYNCCL_COMMUNICATOR = PyNcclCommunicator(
                 group=self._TP_CPU_GROUP,
                 device=_LOCAL_RANK,
             )
+            print(f"create comm takes: {time.time() - start:.2f}s")
 
             # Initialize a custom fast all-reduce implementation.
+            start = time.time()
             if _ENABLE_CUSTOM_ALL_REDUCE:
                 from vllm.distributed.device_communicators.custom_all_reduce import (
                     CustomAllreduce)
@@ -93,15 +101,16 @@ class ActiveGroupManager:
                     group=self._TP_CPU_GROUP,
                     device=_LOCAL_RANK,
                 )
+            print(f"create ca comm takes: {time.time() - start:.2f}s")
 
             
 
     def destroy_model_parallel(self):
-        if self._TP_DEVICE_GROUP is not None:
-            torch.distributed.destroy_process_group(self._TP_DEVICE_GROUP)
+        # if self._TP_DEVICE_GROUP is not None:
+        #     torch.distributed.destroy_process_group(self._TP_DEVICE_GROUP)
         self._TP_DEVICE_GROUP = None
-        if self._TP_CPU_GROUP is not None:
-            torch.distributed.destroy_process_group(self._TP_CPU_GROUP)
+        # if self._TP_CPU_GROUP is not None:
+        #     torch.distributed.destroy_process_group(self._TP_CPU_GROUP)
         self._TP_CPU_GROUP = None
         self._TP_PYNCCL_COMMUNICATOR = None
         self._TP_CA_COMMUNICATOR = None
