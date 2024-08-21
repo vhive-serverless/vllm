@@ -24,7 +24,7 @@ def main():
     src = 0
     dst = 1
     llm.do_liquid(shard_ids, src, dst)
-    llm.do_liquid(shard_ids, dst, src)
+    # llm.do_liquid(shard_ids, dst, src)
     # llm.do_liquid(shard_ids, src, dst)
 
     sampling_params = SamplingParams(temperature=0)
