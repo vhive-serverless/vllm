@@ -12,6 +12,7 @@ from torch.distributed import ProcessGroup
 
 import vllm.envs as envs
 from vllm.logger import init_logger
+from vllm.liquid.liquid_communicator import LiquidCommunicator
 
 logger = init_logger(__name__)
 
@@ -107,11 +108,11 @@ class ActiveGroupManager:
 
 ACTIVE_GROUP_MANAGER: Optional[ActiveGroupManager] = None
 TCP_STORE_PORT = 7001
-TCP_STORE = None
+LIQUID_COMMUNICATOR = None
 
-def get_tcp_store():
-    global TCP_STORE
-    return TCP_STORE
+def get_liquid_communicator():
+    global LIQUID_COMMUNICATOR
+    return LIQUID_COMMUNICATOR
         
 
 
@@ -155,6 +156,7 @@ def init_distributed_environment(
     distributed_init_method: str = "env://",
     local_rank: int = -1,
     backend: str = "nccl",
+    dtype: torch.dtype = torch.float,
 ):
     logger.debug(
         "world_size=%d rank=%d local_rank=%d "
@@ -199,9 +201,13 @@ def init_distributed_environment(
         if ACTIVE_GROUP_MANAGER is None or ACTIVE_GROUP_MANAGER._TP_DEVICE_GROUP is None:
             ACTIVE_GROUP_MANAGER = ActiveGroupManager(rank)
 
-        global TCP_STORE, TCP_STORE_PORT
-        host = envs.VLLM_HOST_IP if envs.VLLM_HOST_IP != "" else "127.0.0.1"
-        TCP_STORE = torch.distributed.TCPStore(host, TCP_STORE_PORT, world_size, (rank==0))
+        global LIQUID_COMMUNICATOR, TCP_STORE_PORT
+        LIQUID_COMMUNICATOR = LiquidCommunicator(
+            buffer_size_gb=0.5,
+            group=_DEVICE_WORLD_GROUP,
+            tcp_store_port=TCP_STORE_PORT,
+            dtype=dtype,
+        )
         
 
 def initialize_model_parallel(

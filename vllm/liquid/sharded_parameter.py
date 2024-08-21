@@ -3,7 +3,7 @@ from torch.nn.parameter import Parameter
 from typing import List, Optional, Any, Dict
 
 class ShardedParameter(Parameter):
-    def __new__(cls, data=None, requires_grad=True, num_shards=1, shard_dim=0, shard_ids=None):
+    def __new__(cls, data=None, requires_grad=False, num_shards=1, shard_dim=0, shard_ids=None):
         # Call the __new__ method of the Parameter class
         instance = super(ShardedParameter, cls).__new__(cls, data, requires_grad)
         return instance
@@ -13,7 +13,7 @@ class ShardedParameter(Parameter):
                  num_shards: int = 1,
                  shard_dim: int = 0,
                  shard_ids : Optional[List[int]] = None,
-                 requires_grad: bool = True,
+                 requires_grad: bool = False,
                  ):
         super().__init__()
         self.requires_grad = requires_grad
@@ -63,10 +63,12 @@ class ShardedParameter(Parameter):
         if shard_id not in self.shard_ids:
             raise ValueError(f"shard_id: {shard_id} not in self.shard_ids: {self.shard_ids}")
         new_data = self._delete_shard(self.data, shard_id)
+        self.data.detach()
         self.data = new_data
 
         index = self.shard_ids.index(shard_id)
         self.shard_ids.pop(index)
+
 
     def _is_appendable(self, shard_data: torch.Tensor) -> bool:
         # # Check if the dimension of shard_dim has the same size as the current shard size

@@ -13,7 +13,7 @@ from .parallel_state import (get_device_world_group, get_cpu_world_group, get_pp
                              get_tensor_model_parallel_world_size,
                              get_tp_ca_communicator,
                              get_tp_pynccl_communicator,
-                             get_tcp_store,
+                             get_liquid_communicator,
                              )
 
 

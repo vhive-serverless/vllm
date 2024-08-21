@@ -384,7 +384,12 @@ class OPTForCausalLM(nn.Module):
         assert shard_id in self.shard_ids, f"{shard_id} not in the model"
         for name, param in self.named_parameters():
             if hasattr(param, "num_shards"):
+
+                # free_memory, total_memory = torch.cuda.mem_get_info()
+                # print(f"Inside opt liquid, param: {name}: There is still {free_memory/(1024**3):.2f} GB")
+                torch.cuda.empty_cache()
                 param.delete_shard(shard_id)
+        
 
         for layer in self.model.decoder.layers:
             layer.self_attn.attn.delete_shard(shard_id)
