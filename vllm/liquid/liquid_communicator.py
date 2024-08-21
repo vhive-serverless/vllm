@@ -6,7 +6,7 @@ import math
 import time
 
 class LiquidCommunicator:
-    def __init__(self, buffer_size_gb: float, group, tcp_store_port: int = 12345, dtype=torch.float16):
+    def __init__(self, buffer_size_gb: float, group:dist.group, tcp_store_port: int = 12345, dtype=torch.float16):
         self.buffer_size_gb = buffer_size_gb
         self.buffer_length = int(buffer_size_gb * (1024**3) / torch.finfo(dtype).bits * 8)  # Calculate number of elements
         self.dtype = dtype
@@ -39,7 +39,8 @@ class LiquidCommunicator:
 
     def _clear_store(self):
         for meta_key in self.meta_keys:
-            self.store.delete_key(meta_key)
+            success = self.store.delete_key(meta_key)
+            assert success
         self.meta_keys = []
 
     def _recv_meta_data(self, keys: List[str]) -> Tuple[int, Dict[str, MetaData]]:
@@ -79,6 +80,8 @@ class LiquidCommunicator:
         if buffer_start > 0:
             dist.send(tensor=self.buffer[:buffer_start], dst=dst_rank)
 
+        self._clear_store()
+
 
     def recv_dict(self, src_rank: int, keys: List[str]) -> Dict[str, torch.Tensor]:
         # Retrieve metadata from TCPStore
@@ -86,6 +89,8 @@ class LiquidCommunicator:
         received_times = math.ceil(total_length / self.buffer_length)
         remaining_length = total_length % self.buffer_length
         assert received_times >= 1
+        free_mem = torch.cuda.mem_get_info()[0]/(1024**3)
+        # print(f"Before recing dict, free mem: {free_mem:.2f} GB")
         data_tensor = torch.empty(total_length, dtype=self.dtype, device='cuda')
         data_offset = 0
 
@@ -108,5 +113,4 @@ class LiquidCommunicator:
             shape = meta_data.shape
             tensor_dict[key] = data_tensor[offset:offset+length].view(shape)
 
-        self._clear_store()
         return tensor_dict

@@ -22,8 +22,6 @@ def main_send():
         tensor_length = int(tensor_size * (1024**3) / torch.finfo(dtype).bits * 8)  # Calculate number of elements
         tensor_dict = {f'tensor_{i}': torch.rand(tensor_length, dtype=dtype, device='cuda') for i in range(10)}
 
-        # Create a TCPStore
-        # store = dist.TCPStore("localhost", TCP_STORE_PORT, world_size=2, is_master=True)
         comm = LiquidCommunicator(
             buffer_size_gb=buffer_size_gb,
             group=group,
@@ -36,7 +34,6 @@ def main_send():
         start = time.time()
         with CudaMemoryProfiler(interval=0.1,cuda_index=0) as m:
             comm.send_dict(tensor_dict, dst_rank=1)
-            # send_dict(tensor_dict, dst_rank=1, store=store)
         dist.barrier()
         latency = time.time() - start
         bw = 10 * tensor_size / latency
@@ -57,7 +54,6 @@ def main_receive():
     # Initialize the process group for distributed communication
     torch.cuda.set_device(1)
     group=dist.init_process_group(backend='nccl', init_method=f'tcp://localhost:{TCP_PORT}', world_size=2, rank=1)
-    # store = dist.TCPStore("localhost", TCP_STORE_PORT, world_size=2, is_master=False)
 
     # Define the keys of the tensors you expect to receive
     keys = [f'tensor_{i}' for i in range(10)]
@@ -73,7 +69,6 @@ def main_receive():
     # Receive the tensor dictionary from another GPU
     dist.barrier()
     with CudaMemoryProfiler(interval=0.01, cuda_index=1) as m:
-        # receive_dict(src_rank=0, store=store, keys=keys, group=group)
         received_dict = comm.recv_dict(src_rank=0, keys=keys)
     dist.barrier()
     mem_records = m.get_memory_records()

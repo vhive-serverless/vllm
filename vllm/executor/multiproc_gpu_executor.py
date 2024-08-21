@@ -1,5 +1,6 @@
 import asyncio
 import os
+import torch
 from functools import partial
 from typing import Any, List, Optional, Dict, Set
 
@@ -143,6 +144,8 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         return self.rank_worker_info_map[rank].worker
 
     def do_liquid(self, liquid_request: LiquidRequest) -> LiquidOutput:
+        free_memory, total_memory = torch.cuda.mem_get_info()
+        print(f"Before liquid, remaining space on GPU 0: {free_memory/(1024**3):.2f} GB")
         shard_ids = liquid_request.shard_ids
         src = liquid_request.src
         dst = liquid_request.dst
@@ -161,10 +164,13 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         # if the worker has not been initialized before, send all tensor from the src, if has, only send sharded tensor
         only_send_sharded_weights = self.rank_worker_info_map[dst].initialized 
         self._run_workers("liquid_model_weights", shard_ids=shard_ids, src=src, dst=dst, only_send_sharded_weights=only_send_sharded_weights, worker_ranks=[src, dst])
+
+        free_memory, total_memory = torch.cuda.mem_get_info()
+        print(f"After liquid model weights, remaining space on GPU 0: {free_memory/(1024**3):.2f} GB")
         # update the cache engine on dst
         # TODO: recalculates the number of gpu blocks and cpu blocks, currently just keep the same number
         num_gpu_blocks = self.cache_config.num_gpu_blocks
-        num_cpu_blocks = self.cache_config.num_cpu_blocks
+        num_cpu_blocks = 100
         import time
         start = time.time()
         self._run_workers("update_cache",
@@ -177,6 +183,8 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         # if dst has not initialize, then kv cache should be loaded, otherwise it should be appended
         load_kv_cache = not self.rank_worker_info_map[dst].initialized
         self._run_workers("liquid_kv_cache", shard_ids=shard_ids, src=src, dst=dst, load_kv_cache = load_kv_cache, worker_ranks=[src, dst])
+        free_memory, total_memory = torch.cuda.mem_get_info()
+        print(f"After liquid model kvc, remaining space on GPU 0: {free_memory/(1024**3):.2f} GB")
 
         self.rank_worker_info_map[dst].initialized = True
          

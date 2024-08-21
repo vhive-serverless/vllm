@@ -9,7 +9,7 @@ from vllm.logger import init_logger
 from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, is_pin_memory_available
 from vllm.liquid.sharded_tensor import ShardedTensor
 from vllm.liquid.utils import send_dict, receive_dict
-from vllm.distributed.communication_op import get_tcp_store, get_device_world_group,get_tensor_model_parallel_group, get_tensor_model_parallel_cpu_group
+from vllm.distributed.communication_op import get_liquid_communicator, get_device_world_group,get_tensor_model_parallel_group, get_tensor_model_parallel_cpu_group
 
 logger = init_logger(__name__)
 
@@ -99,17 +99,20 @@ class CacheEngine:
     def send_shards(self, shard_ids: List[int], dst: int):
         shards_cache = self.get_shards(shard_ids)
         # print(f"sharded_weights.keys: {shards_weights.keys()}")
-        store = get_tcp_store()
-        group = get_device_world_group()
-        send_dict(shards_cache, dst, store, group)
+        liquid_comm = get_liquid_communicator()
+        liquid_comm.send_dict(shards_cache, dst)
+        for name, cache in shards_cache.items():
+            del cache
+        del shards_cache
+        torch.cuda.empty_cache()
         self.delete_shards(shard_ids)
+        torch.cuda.empty_cache()
         logger.info(f"Successfully send kv cache shards: {shard_ids} to rank: {dst}")
 
     def recv_shards(self, shard_ids: List[int], src: int):
-        store = get_tcp_store()
-        group = get_device_world_group()
+        liquid_comm = get_liquid_communicator()
         tensor_names = [f"layer_{i}" for i in range(len(self.gpu_cache))]
-        shards_cache = receive_dict(src, store, tensor_names, group)
+        shards_cache = liquid_comm.recv_dict(src, tensor_names)
         return shards_cache
         
 
@@ -128,6 +131,8 @@ class CacheEngine:
             raise NotImplementedError(f"delete shard with length > 1 is not implemented yet")
         shard_id = shard_ids[0]
         for cache in self.gpu_cache:
+            free_memory, total_memory = torch.cuda.mem_get_info()
+            # print(f"When deleting cache: there is still {free_memory/(1024**3):.2f} GB")
             cache.delete_shard(shard_id) 
         # TODO: handle cpu cache
         # for cache in self.cpu_cache:

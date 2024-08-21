@@ -17,7 +17,6 @@ from vllm.distributed import (broadcast_tensor_dict,
                               )
 from vllm.distributed.parallel_state import (get_tensor_model_parallel_group,
                                              get_tensor_model_parallel_cpu_group,
-                                             get_tcp_store,
                                              )
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
@@ -127,9 +126,11 @@ class Worker(WorkerBase):
                                             self.distributed_init_method,
                                             self.local_rank,
                                             self.liquid_config,
+                                            self.model_config.dtype
                                             )
         # Set random seed.
         set_random_seed(self.model_config.seed)
+
 
     def update_active_ranks(self, active_ranks: List[int]):
         self.active_ranks = active_ranks
@@ -151,6 +152,11 @@ class Worker(WorkerBase):
                 shards_weights = self.model_runner.recv_shards(shard_ids, src, only_sharded=True)
                 self.model_runner.model.append_shards_weights(shard_ids, shards_weights)
 
+            for name, weight in shards_weights.items():
+                del weight
+            del shards_weights
+            torch.cuda.empty_cache()
+
     def update_cache(self, num_gpu_blocks: int, num_cpu_blocks: int, shard_ids: List[int]):
         if hasattr(self, "cache_engine"):
             if self.cache_engine.num_gpu_blocks == num_gpu_blocks:
@@ -170,6 +176,10 @@ class Worker(WorkerBase):
                 self.cache_engine.load_shards(shard_ids,shards_cache)
             else:
                 self.cache_engine.append_shards(shard_ids, shards_cache)
+            for name, cache in shards_cache.items():
+                del cache
+            del shards_cache
+            torch.cuda.empty_cache()
 
 
     def save_sharded_state(
@@ -422,7 +432,8 @@ def init_worker_distributed_environment(
     rank: int,
     distributed_init_method: Optional[str] = None,
     local_rank: int = -1,
-    liquid_config: Optional[LiquidConfig] = None
+    liquid_config: Optional[LiquidConfig] = None,
+    dtype: torch.dtype = torch.float,
 ) -> None:
     """Initialize the distributed environment."""
     set_custom_all_reduce(not parallel_config.disable_custom_all_reduce)
@@ -432,7 +443,7 @@ def init_worker_distributed_environment(
         world_size = len(liquid_config.liquid_gpu_range)
 
     init_distributed_environment(world_size,rank,
-                                 distributed_init_method, local_rank)
+                                 distributed_init_method, local_rank, dtype=dtype)
     if liquid_config is None:
         ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                         parallel_config.pipeline_parallel_size,

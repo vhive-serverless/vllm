@@ -5,7 +5,7 @@ import asyncio
 
 import os
 
-model = "facebook/opt-125m"
+model = "facebook/opt-6.7b"
 # model_path = os.path.join("./models", model)
 
 def main():
@@ -18,13 +18,13 @@ def main():
         liquid_gpu_space = 32,
         liquid_driver_gpu_id = 0, 
         liquid_total_num_shards = 2,
-        gpu_memory_utilization=0.3
+        # gpu_memory_utilization=0.8
     )
     shard_ids = [1]
     src = 0
     dst = 1
     llm.do_liquid(shard_ids, src, dst)
-    # llm.do_liquid(shard_ids, dst, src)
+    llm.do_liquid(shard_ids, dst, src)
     # llm.do_liquid(shard_ids, src, dst)
 
     sampling_params = SamplingParams(temperature=0)

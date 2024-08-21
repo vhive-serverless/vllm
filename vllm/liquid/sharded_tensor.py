@@ -51,6 +51,7 @@ class ShardedTensor(Tensor):
         return shard
 
     def _delete_shard(self, tensor: torch.Tensor, shard_id: int) -> torch.Tensor:
+
         index = self.shard_ids.index(shard_id)
 
         start_index = index * self.shard_size
@@ -58,6 +59,7 @@ class ShardedTensor(Tensor):
         before_shard = tensor.narrow(self.shard_dim, 0, start_index)
         after_shard = tensor.narrow(self.shard_dim, start_index + self.shard_size, self.size(self.shard_dim) - start_index - self.shard_size)
 
+        free_memory, total_memory = torch.cuda.mem_get_info()
         # Concatenate the views to form a new tensor
         new_data = torch.cat([before_shard, after_shard], dim=self.shard_dim)
         return new_data
