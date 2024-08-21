@@ -14,6 +14,7 @@ from vllm.utils import (get_distributed_init_method, get_ip, get_open_port,
                         get_vllm_instance_id, make_async)
 from vllm.liquid.request import LiquidRequest, LiquidOutput
 from vllm.liquid.liquid_worker_info import LiquidWorkerInfo
+import time
 
 logger = init_logger(__name__)
 
@@ -150,6 +151,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         src = liquid_request.src
         dst = liquid_request.dst
         liquid_output = LiquidOutput(shard_ids, src, dst)
+        liquid_output.liquid_start = time.time()
         # check if the src is active
         active_ranks = self.get_active_ranks()
         assert src in active_ranks, f"liquid src: {src} is not active!"
@@ -159,11 +161,13 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         if group_member_change:
             active_ranks = self.get_active_ranks()
             self.update_active_ranks(active_ranks)
+        liquid_output.finished_update_workers = time.time()
         
         # load the shard data(model weights) in liquid mode
         # if the worker has not been initialized before, send all tensor from the src, if has, only send sharded tensor
         only_send_sharded_weights = self.rank_worker_info_map[dst].initialized 
         self._run_workers("liquid_model_weights", shard_ids=shard_ids, src=src, dst=dst, only_send_sharded_weights=only_send_sharded_weights, worker_ranks=[src, dst])
+        liquid_output.finished_liquid_model_weights = time.time()
 
         free_memory, total_memory = torch.cuda.mem_get_info()
         print(f"After liquid model weights, remaining space on GPU 0: {free_memory/(1024**3):.2f} GB")
@@ -171,18 +175,16 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         # TODO: recalculates the number of gpu blocks and cpu blocks, currently just keep the same number
         num_gpu_blocks = self.cache_config.num_gpu_blocks
         num_cpu_blocks = 100
-        import time
-        start = time.time()
         self._run_workers("update_cache",
                           num_gpu_blocks=num_gpu_blocks,
                           num_cpu_blocks=num_cpu_blocks, 
                           shard_ids = shard_ids,
                           worker_ranks=[src, dst])
-        initialize_mem_latency = time.time() - start
-        logger.info(f"Intiialize mem latency: {initialize_mem_latency:.2f}s")
+        liquid_output.finished_init_mem = time.time()
         # if dst has not initialize, then kv cache should be loaded, otherwise it should be appended
         load_kv_cache = not self.rank_worker_info_map[dst].initialized
         self._run_workers("liquid_kv_cache", shard_ids=shard_ids, src=src, dst=dst, load_kv_cache = load_kv_cache, worker_ranks=[src, dst])
+        liquid_output.finished_liquid_kvc = time.time()
         free_memory, total_memory = torch.cuda.mem_get_info()
         print(f"After liquid model kvc, remaining space on GPU 0: {free_memory/(1024**3):.2f} GB")
 
