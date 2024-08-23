@@ -1,10 +1,10 @@
 from vllm import LLM, SamplingParams
-from vllm.engine.async_llm_engine import AsyncLLMEngine, AsyncEngineArgs
-from vllm import EngineArgs, LLMEngine
+# from vllm import EngineArgs, LLMEngine
 import asyncio
 
 import os
 
+# model = "meta-llama/Meta-Llama-3-8B"
 model = "facebook/opt-6.7b"
 # model_path = os.path.join("./models", model)
 
@@ -12,8 +12,8 @@ def main():
     llm = LLM(
         model, 
         enforce_eager=True,
-        load_format="auto",
-        # tensor_parallel_size=2,
+        # load_format="auto",
+        tensor_parallel_size=2,
         liquid_gpu_range = [0,1],
         liquid_gpu_space = 32,
         liquid_driver_gpu_id = 0, 
@@ -24,14 +24,17 @@ def main():
     src = 0
     dst = 1
     llm.do_liquid(shard_ids, src, dst)
-    # llm.do_liquid(shard_ids, dst, src)
+    llm.do_liquid(shard_ids, dst, src)
     # llm.do_liquid(shard_ids, src, dst)
 
-    sampling_params = SamplingParams(temperature=0)
-    request_num = 10
+    sampling_params = SamplingParams(temperature=0, min_tokens=127, max_tokens=128)
+    request_num = 1
+    word = "what"
+    prompt = "what" * 1000
+    inputs = [prompt for _ in range(request_num)]
     for request_id in range(request_num):
-        output = llm.generate(f"What is LLM?", sampling_params=sampling_params)
-        print(output[0].outputs[0].text)
+        output = llm.generate(inputs, sampling_params=sampling_params)
+        print(f"output: {output[0].outputs[0].text}")
 
 
         
