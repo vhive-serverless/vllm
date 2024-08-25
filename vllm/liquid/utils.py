@@ -120,3 +120,14 @@ def receive_dict(src_rank: int, store: Any, keys: List[str], group = None, dtype
     tensor_dict = _decode_tensors_to_dict(meta_data, data_tensor)
     latency = time.time() - start
     return tensor_dict
+
+def get_tensor_num_bytes(tensor: torch.Tensor) -> int:
+
+    num_elements = tensor.numel()
+
+    # Get the number of bits per element
+    bits = torch.finfo(tensor.dtype).bits  # or torch.iinfo(tensor.dtype).bits for integers
+
+    # Calculate the total memory occupied (in bytes)
+    total_memory_bytes = (num_elements * bits) // 8
+    return total_memory_bytes

@@ -106,56 +106,56 @@ class ShardedTensor(Tensor):
         
 
 
-class QKVShardedTensor(ShardedTensor):
-    def __init__(self, 
-                 data: torch.Tensor,
-                 num_shards: int = 1,
-                 shard_dim: int = 0,
-                 shard_ids : Optional[List[int]] = None
-                 ):
-        super().__init__(data, num_shards, shard_dim, shard_ids)
-        assert self.size(shard_dim) % 3 == 0, f"QKV parameter must have a length divisible by 3 along dim: {shard_dim}"
-        qkv_shard_size = self.size(shard_dim) // 3
-        self.q_data = self.narrow(shard_dim, 0, qkv_shard_size)
-        self.k_data = self.narrow(shard_dim, qkv_shard_size, qkv_shard_size)
-        self.v_data = self.narrow(shard_dim, 2*qkv_shard_size, qkv_shard_size)
+# class QKVShardedTensor(ShardedTensor):
+#     def __init__(self, 
+#                  data: torch.Tensor,
+#                  num_shards: int = 1,
+#                  shard_dim: int = 0,
+#                  shard_ids : Optional[List[int]] = None
+#                  ):
+#         super().__init__(data, num_shards, shard_dim, shard_ids)
+#         assert self.size(shard_dim) % 3 == 0, f"QKV parameter must have a length divisible by 3 along dim: {shard_dim}"
+#         qkv_shard_size = self.size(shard_dim) // 3
+#         self.q_data = self.narrow(shard_dim, 0, qkv_shard_size)
+#         self.k_data = self.narrow(shard_dim, qkv_shard_size, qkv_shard_size)
+#         self.v_data = self.narrow(shard_dim, 2*qkv_shard_size, qkv_shard_size)
 
-    def get_shard(self, shard_id: int) -> torch.Tensor:
-        q_shard = self._get_shard(self.q_data, shard_id)
-        k_shard = self._get_shard(self.k_data, shard_id)
-        v_shard = self._get_shard(self.v_data, shard_id)
+#     def get_shard(self, shard_id: int) -> torch.Tensor:
+#         q_shard = self._get_shard(self.q_data, shard_id)
+#         k_shard = self._get_shard(self.k_data, shard_id)
+#         v_shard = self._get_shard(self.v_data, shard_id)
 
-        shard = torch.cat([q_shard, k_shard, v_shard], dim=self.shard_dim)
-        return shard
+#         shard = torch.cat([q_shard, k_shard, v_shard], dim=self.shard_dim)
+#         return shard
 
-    def delete_shard(self, shard_id: int) -> None:
-        new_q_data = self._delete_shard(self.q_data, shard_id)
-        new_k_data = self._delete_shard(self.k_data, shard_id)
-        new_v_data = self._delete_shard(self.v_data, shard_id)
+#     def delete_shard(self, shard_id: int) -> None:
+#         new_q_data = self._delete_shard(self.q_data, shard_id)
+#         new_k_data = self._delete_shard(self.k_data, shard_id)
+#         new_v_data = self._delete_shard(self.v_data, shard_id)
 
-        new_data = torch.cat([new_q_data, new_k_data, new_v_data], dim=self.shard_dim)
-        self.data = new_data
+#         new_data = torch.cat([new_q_data, new_k_data, new_v_data], dim=self.shard_dim)
+#         self.data = new_data
 
-        index = self.shard_ids.index(shard_id)
-        self.shard_ids.pop(index)
+#         index = self.shard_ids.index(shard_id)
+#         self.shard_ids.pop(index)
     
     
-    def append_shard(self, shard_id: int, shard_data: torch.Tensor) -> None:
-        if shard_id in self.shard_ids:
-            raise ValueError(f"shard_id: {shard_id} is already in self.shard_ids")
+#     def append_shard(self, shard_id: int, shard_data: torch.Tensor) -> None:
+#         if shard_id in self.shard_ids:
+#             raise ValueError(f"shard_id: {shard_id} is already in self.shard_ids")
 
-        if not self._is_appendable(shard_data):
-            raise ValueError(f"data with shape: {shard_data.shape} cannot be appended to tensor with shape: {self.shape}")
+#         if not self._is_appendable(shard_data):
+#             raise ValueError(f"data with shape: {shard_data.shape} cannot be appended to tensor with shape: {self.shape}")
 
-        qkv_shard_size = shard_data.size(self.shard_dim) // 3
-        appended_q_data = shard_data.narrow(self.shard_dim, 0, qkv_shard_size)
-        appended_k_data = shard_data.narrow(self.shard_dim, qkv_shard_size, qkv_shard_size)
-        appended_v_data = shard_data.narrow(self.shard_dim, 2*qkv_shard_size, qkv_shard_size)
+#         qkv_shard_size = shard_data.size(self.shard_dim) // 3
+#         appended_q_data = shard_data.narrow(self.shard_dim, 0, qkv_shard_size)
+#         appended_k_data = shard_data.narrow(self.shard_dim, qkv_shard_size, qkv_shard_size)
+#         appended_v_data = shard_data.narrow(self.shard_dim, 2*qkv_shard_size, qkv_shard_size)
 
-        new_q_data = self._append_shard(self.q_data, appended_q_data)
-        new_k_data = self._append_shard(self.k_data, appended_k_data)
-        new_v_data = self._append_shard(self.v_data, appended_v_data)
+#         new_q_data = self._append_shard(self.q_data, appended_q_data)
+#         new_k_data = self._append_shard(self.k_data, appended_k_data)
+#         new_v_data = self._append_shard(self.v_data, appended_v_data)
 
-        self.data = torch.cat([new_q_data, new_k_data, new_v_data], dim=self.shard_dim)
+#         self.data = torch.cat([new_q_data, new_k_data, new_v_data], dim=self.shard_dim)
 
-        self.shard_ids.append(shard_id) 
+#         self.shard_ids.append(shard_id) 

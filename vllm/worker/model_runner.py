@@ -149,16 +149,20 @@ class ModelRunner:
         # Set after load_model.
         self.lora_manager: Optional[LRUCacheWorkerLoRAManager] = None
 
-    def send_shards(self, shard_ids: List[int], dst: int, only_sharded: bool = False):
+    def send_shards(self, shard_ids: List[int], dst: int, only_sharded: bool = False) -> int:
         shards_weights:Dict[str, torch.Tensor] = self.model.get_shards_weights(shard_ids, only_sharded=only_sharded)
         liquid_comm = get_liquid_communicator()
-        liquid_comm.send_dict(shards_weights, dst)
+        bytes_sent = liquid_comm.send_dict(shards_weights, dst)
         for name, weights in shards_weights.items():
             del weights
         del shards_weights
         # del self.model
         self.model.delete_shards(shard_ids)
         # logger.info(f"Successfully send model weights shards: {shard_ids} to rank: {dst}")
+        torch.cuda.empty_cache()
+        free_mem, _ = torch.cuda.mem_get_info()
+        print(f"After sending shards, there are {free_mem/(1024**3):.2f}GB remaining on GPU0")
+        return bytes_sent
 
     def recv_shards(self, shard_ids: List[int], src: int, only_sharded: bool = False):
         liquid_comm = get_liquid_communicator()

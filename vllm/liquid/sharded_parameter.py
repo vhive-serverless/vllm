@@ -63,7 +63,7 @@ class ShardedParameter(Parameter):
         if shard_id not in self.shard_ids:
             raise ValueError(f"shard_id: {shard_id} not in self.shard_ids: {self.shard_ids}")
         new_data = self._delete_shard(self.data, shard_id)
-        self.data.detach()
+        # self.data.detach()
         self.data = new_data
 
         index = self.shard_ids.index(shard_id)
@@ -94,8 +94,9 @@ class ShardedParameter(Parameter):
         if not self._is_appendable(shard_data):
             raise ValueError(f"data with shape: {shard_data.shape} cannot be appended to tensor with shape: {self.shape}")
 
-        new_data = self._append_shard(self.data, shard_data)
-        self.data = new_data
+        # new_data = self._append_shard(self.data, shard_data)
+        # self.data = new_data
+        self.data = self._append_shard(self.data, shard_data)
 
         self.shard_ids.append(shard_id) 
 
@@ -131,6 +132,8 @@ class QKVShardedParameter(ShardedParameter):
 
         new_data = torch.cat([self.q_data, self.k_data, self.v_data], dim=self.shard_dim)
         self.data = new_data
+        del self.q_data, self.k_data, self.v_data
+        self.q_data, self.k_data, self.v_data = self.data.chunk(3)
 
         index = self.shard_ids.index(shard_id)
         self.shard_ids.pop(index)
@@ -153,5 +156,6 @@ class QKVShardedParameter(ShardedParameter):
         self.v_data = self._append_shard(self.v_data, appended_v_data)
 
         self.data = torch.cat([self.q_data, self.k_data, self.v_data], dim=self.shard_dim)
+        self.q_data, self.k_data, self.v_data = self.data.chunk(3)
 
         self.shard_ids.append(shard_id) 
