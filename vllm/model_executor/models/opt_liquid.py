@@ -384,7 +384,7 @@ class OPTForCausalLM(nn.Module):
         for name, param in self.named_parameters():
             if hasattr(param, "num_shards"):
                 param.delete_shard(shard_id)
-                torch.cuda.empty_cache()
+                # torch.cuda.empty_cache()
         
 
         for layer in self.model.decoder.layers:
