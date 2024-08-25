@@ -27,6 +27,7 @@ from vllm.worker.model_runner import ModelRunner
 from vllm.worker.worker_base import WorkerBase
 from vllm.liquid.utils import send_dict, receive_dict
 import time
+from vllm.logger import logger
 
 
 class Worker(WorkerBase):
@@ -144,8 +145,10 @@ class Worker(WorkerBase):
         assert self.rank == src or self.rank == dst
         if self.rank == src:
             start = time.time()
-            self.model_runner.send_shards(shard_ids, dst, only_sharded=only_send_sharded_weights)
-            print(f"send shards takes: {time.time() - start:.2f}s")
+            bytes_sent = self.model_runner.send_shards(shard_ids, dst, only_sharded=only_send_sharded_weights)
+            send_latency = time.time() - start
+            sent_bandwidth = bytes_sent / ((1024**3) * send_latency) 
+            logger.info(f"send weights shards takes: {send_latency:.2f}s, sent out: {bytes_sent/(1024**3):.2f}GB, sent bw: {sent_bandwidth:.2f}GB/s")
         else:
             if not hasattr(self.model_runner, "model"):
                 start = time.time()
@@ -159,7 +162,8 @@ class Worker(WorkerBase):
                 print(f"load shards takes: {time.time() - start:.2f}s")
             else:
                 shards_weights = self.model_runner.recv_shards(shard_ids, src, only_sharded=True)
-                self.model_runner.model.append_shards_weights(shard_ids, shards_weights)
+                self.model_runner.model.append_shards_weights(shard_ids, 
+                    shards_weights = shards_weights)
             for name, weight in shards_weights.items():
                 del weight
             del shards_weights
@@ -177,18 +181,17 @@ class Worker(WorkerBase):
     def liquid_kv_cache(self, shard_ids: List[int], src: int, dst: int, load_kv_cache):
         assert self.rank == src or self.rank == dst
         if self.rank == src:
-            self.cache_engine.send_shards(shard_ids, dst)
+            bytes_sent = self.cache_engine.send_shards(shard_ids, dst)
         else:
             start = time.time()
             shards_cache = self.cache_engine.recv_shards(shard_ids, src)
-            start = time.time()
             if load_kv_cache:
                 self.cache_engine.load_shards(shard_ids,shards_cache)
+                for name, cache in shards_cache.items():
+                    del cache
+                del shards_cache
             else:
                 self.cache_engine.append_shards(shard_ids, shards_cache)
-            for name, cache in shards_cache.items():
-                del cache
-            del shards_cache
             torch.cuda.empty_cache()
 
 

@@ -166,11 +166,15 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         # load the shard data(model weights) in liquid mode
         # if the worker has not been initialized before, send all tensor from the src, if has, only send sharded tensor
         only_send_sharded_weights = self.rank_worker_info_map[dst].initialized 
+        torch.cuda.empty_cache()
+        free_memory, total_memory = torch.cuda.mem_get_info()
+        logger.info(f"Before liquid model weights, remaining space on GPU 0: {free_memory/(1024**3):.2f} GB")
         self._run_workers("liquid_model_weights", shard_ids=shard_ids, src=src, dst=dst, only_send_sharded_weights=only_send_sharded_weights, worker_ranks=[src, dst])
         liquid_output.finished_liquid_model_weights = time.time()
 
+        torch.cuda.empty_cache()
         free_memory, total_memory = torch.cuda.mem_get_info()
-        print(f"After liquid model weights, remaining space on GPU 0: {free_memory/(1024**3):.2f} GB")
+        logger.info(f"After liquid model weights, remaining space on GPU 0: {free_memory/(1024**3):.2f} GB")
         # update the cache engine on dst
         # TODO: recalculates the number of gpu blocks and cpu blocks, currently just keep the same number
         num_gpu_blocks = self.cache_config.num_gpu_blocks
@@ -185,8 +189,9 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         load_kv_cache = not self.rank_worker_info_map[dst].initialized
         self._run_workers("liquid_kv_cache", shard_ids=shard_ids, src=src, dst=dst, load_kv_cache = load_kv_cache, worker_ranks=[src, dst])
         liquid_output.finished_liquid_kvc = time.time()
+        torch.cuda.empty_cache()
         free_memory, total_memory = torch.cuda.mem_get_info()
-        print(f"After liquid model kvc, remaining space on GPU 0: {free_memory/(1024**3):.2f} GB")
+        logger.info(f"After liquid model kvc, remaining space on GPU 0: {free_memory/(1024**3):.2f} GB")
 
         self.rank_worker_info_map[dst].initialized = True
          

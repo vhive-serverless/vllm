@@ -97,19 +97,22 @@ class CacheEngine:
             kv_cache.append(cache)
         return kv_cache
 
-    def send_shards(self, shard_ids: List[int], dst: int):
+    def send_shards(self, shard_ids: List[int], dst: int) -> int:
         shards_cache = self.get_shards(shard_ids)
         # print(f"sharded_weights.keys: {shards_weights.keys()}")
         liquid_comm = get_liquid_communicator()
-        liquid_comm.send_dict(shards_cache, dst)
+        start = time.time()
+        bytes_sent = liquid_comm.send_dict(shards_cache, dst)
+        send_latency = time.time() - start
+        sent_bandwidth = bytes_sent / ((1024**3) * send_latency) 
+        logger.info(f"send kvc shards takes: {send_latency:.2f}s, sent out: {bytes_sent/(1024**3):.2f}GB, sent bw: {sent_bandwidth:.2f}GB/s")
         for name, cache in shards_cache.items():
             del cache
         del shards_cache
         # torch.cuda.empty_cache()
-        start  = time.time()
         self.delete_shards(shard_ids)
-        torch.cuda.empty_cache()
         logger.info(f"Successfully send kv cache shards: {shard_ids} to rank: {dst}")
+        return bytes_sent
 
     def recv_shards(self, shard_ids: List[int], src: int):
         liquid_comm = get_liquid_communicator()
@@ -133,8 +136,6 @@ class CacheEngine:
             raise NotImplementedError(f"delete shard with length > 1 is not implemented yet")
         shard_id = shard_ids[0]
         for cache in self.gpu_cache:
-            free_memory, total_memory = torch.cuda.mem_get_info()
-            # print(f"When deleting cache: there is still {free_memory/(1024**3):.2f} GB")
             cache.delete_shard(shard_id) 
         # TODO: handle cpu cache
         # for cache in self.cpu_cache:
@@ -157,7 +158,9 @@ class CacheEngine:
         shard_id = shard_ids[0]
         assert shard_id not in self.shard_ids, f"shard {shard_id} already in cache tensors: {self.shard_ids}"
         for i, cache in enumerate(self.gpu_cache):
-            cache.append_shard(shard_id, shards_data[f"layer_{i}"])
+            data = shards_data.pop(f"layer_{i}")
+            cache.append_shard(shard_id, data)
+            del data
 
         self.shard_ids.append(shard_id)
 

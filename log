@@ -1,0 +1,120 @@
+INFO 08-25 01:20:24 llm_engine.py:166] Initializing an LLM engine (v0.5.0) with config: model='facebook/opt-6.7b', speculative_config=None, tokenizer='facebook/opt-6.7b', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, rope_scaling=None, rope_theta=None, tokenizer_revision=None, trust_remote_code=False, dtype=torch.float16, max_seq_len=2048, download_dir=None, load_format=LoadFormat.AUTO, tensor_parallel_size=1, disable_custom_all_reduce=False, quantization=None, enforce_eager=True, kv_cache_dtype=auto, quantization_param_path=None, device_config=cuda, decoding_config=DecodingConfig(guided_decoding_backend='outlines'), seed=0, served_model_name=facebook/opt-6.7b)
+INFO 08-25 01:20:25 selector.py:127] Cannot use FlashAttention-2 backend for Volta and Turing GPUs.
+INFO 08-25 01:20:25 selector.py:55] Using XFormers backend.
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m INFO 08-25 01:20:27 selector.py:127] Cannot use FlashAttention-2 backend for Volta and Turing GPUs.
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m INFO 08-25 01:20:27 selector.py:55] Using XFormers backend.
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m INFO 08-25 01:20:28 multiproc_worker_utils.py:216] Worker ready; awaiting tasks
+destory group takes: 0.00s
+create new group takes: 0.00s
+create comm takes: 0.00s
+create ca comm takes: 0.00s
+INFO 08-25 01:20:28 selector.py:127] Cannot use FlashAttention-2 backend for Volta and Turing GPUs.
+INFO 08-25 01:20:28 selector.py:55] Using XFormers backend.
+INFO 08-25 01:20:29 weight_utils.py:218] Using model weights format ['*.bin']
+INFO 08-25 01:20:41 model_runner.py:204] Loading model weights took 12.4036 GB
+INFO 08-25 01:20:42 distributed_gpu_executor.py:56] # GPU blocks: 1889, # CPU blocks: 512
+INFO 08-25 01:20:42 selector.py:127] Cannot use FlashAttention-2 backend for Volta and Turing GPUs.
+INFO 08-25 01:20:42 selector.py:55] Using XFormers backend.
+Before liquid, remaining space on GPU 0: 3.48 GB
+INFO 08-25 01:20:45 multiproc_gpu_executor.py:158] Start to do liquid from src: 0 to dst: 1 with shard_ids: [1]
+destory group takes: 0.00s
+create new group takes: 0.00s
+INFO 08-25 01:20:45 utils.py:623] Found nccl from library libnccl.so.2
+INFO 08-25 01:20:45 pynccl.py:65] vLLM is using nccl==2.20.5
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m destory group takes: 0.00s
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m create new group takes: 0.00s
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m destory group takes: 0.00s
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m create new group takes: 0.00s
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m INFO 08-25 01:20:45 utils.py:623] Found nccl from library libnccl.so.2
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m INFO 08-25 01:20:45 pynccl.py:65] vLLM is using nccl==2.20.5
+create comm takes: 0.10s
+INFO 08-25 01:20:45 custom_all_reduce_utils.py:179] reading GPU P2P access cache from /home/lrq619/.config/vllm/gpu_p2p_access_cache_for_0,1.json
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m create comm takes: 0.10s
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m INFO 08-25 01:20:45 custom_all_reduce_utils.py:179] reading GPU P2P access cache from /home/lrq619/.config/vllm/gpu_p2p_access_cache_for_0,1.json
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m WARNING 08-25 01:20:45 custom_all_reduce.py:179] Custom allreduce is disabled because your platform lacks GPU P2P capability or P2P test failed. To silence this warning, specify disable_custom_all_reduce=True explicitly.
+WARNING 08-25 01:20:45 custom_all_reduce.py:179] Custom allreduce is disabled because your platform lacks GPU P2P capability or P2P test failed. To silence this warning, specify disable_custom_all_reduce=True explicitly.
+create ca comm takes: 0.00s
+INFO 08-25 01:20:45 multiproc_gpu_executor.py:171] Before liquid model weights, remaining space on GPU 0: 3.47 GB
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m create ca comm takes: 0.00s
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m INFO 08-25 01:20:45 selector.py:127] Cannot use FlashAttention-2 backend for Volta and Turing GPUs.
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m INFO 08-25 01:20:45 selector.py:55] Using XFormers backend.
+After sending shards, there are 9.67GB remaining on GPU0
+INFO 08-25 01:20:46 worker.py:151] send weights shards takes: 1.11s, sent out: 6.21GB, sent bw: 5.58GB/s
+INFO 08-25 01:20:46 multiproc_gpu_executor.py:177] After liquid model weights, remaining space on GPU 0: 9.67 GB
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m init model takes: 0.18s
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m recv shards takes: 0.76s
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m load shards takes: 0.02s
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m INFO 08-25 01:20:46 selector.py:127] Cannot use FlashAttention-2 backend for Volta and Turing GPUs.
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m INFO 08-25 01:20:46 selector.py:55] Using XFormers backend.
+INFO 08-25 01:20:47 cache_engine.py:108] send kvc shards takes: 0.87s, sent out: 7.38GB, sent bw: 8.46GB/s
+INFO 08-25 01:20:47 cache_engine.py:114] Successfully send kv cache shards: [1] to rank: 1
+INFO 08-25 01:20:47 multiproc_gpu_executor.py:194] After liquid model kvc, remaining space on GPU 0: 16.84 GB
+INFO 08-25 01:20:47 llm_engine.py:739] Completed! Move shard: [1] from 0 to 1;liquid e2e latency: 2.21s, update worker latency: 0.12s, liquid model weights latency: 1.11s, init mem latency: 0.07s, liquid kvc latency: 0.91s;
+Before liquid, remaining space on GPU 0: 16.83 GB
+INFO 08-25 01:20:48 multiproc_gpu_executor.py:158] Start to do liquid from src: 1 to dst: 0 with shard_ids: [1]
+destory group takes: 0.00s
+create new group takes: 0.00s
+create comm takes: 0.00s
+create ca comm takes: 0.00s
+INFO 08-25 01:20:48 multiproc_gpu_executor.py:171] Before liquid model weights, remaining space on GPU 0: 16.84 GB
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m destory group takes: 0.00s
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m create new group takes: 0.00s
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m After sending shards, there are 23.30GB remaining on GPU0
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m INFO 08-25 01:20:48 worker.py:151] send weights shards takes: 0.82s, sent out: 6.19GB, sent bw: 7.57GB/s
+INFO 08-25 01:20:49 multiproc_gpu_executor.py:177] After liquid model weights, remaining space on GPU 0: 10.31 GB
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m INFO 08-25 01:20:50 cache_engine.py:108] send kvc shards takes: 1.06s, sent out: 7.38GB, sent bw: 6.98GB/s
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m INFO 08-25 01:20:50 cache_engine.py:114] Successfully send kv cache shards: [1] to rank: 0
+INFO 08-25 01:20:50 multiproc_gpu_executor.py:194] After liquid model kvc, remaining space on GPU 0: 2.67 GB
+INFO 08-25 01:20:50 llm_engine.py:739] Completed! Move shard: [1] from 1 to 0;liquid e2e latency: 2.23s, update worker latency: 0.01s, liquid model weights latency: 0.94s, init mem latency: 0.00s, liquid kvc latency: 1.28s;
+Before liquid, remaining space on GPU 0: 2.61 GB
+INFO 08-25 01:20:50 multiproc_gpu_executor.py:158] Start to do liquid from src: 0 to dst: 1 with shard_ids: [1]
+destory group takes: 0.00s
+create new group takes: 0.00s
+INFO 08-25 01:20:50 utils.py:623] Found nccl from library libnccl.so.2
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m destory group takes: 0.00s
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m create new group takes: 0.00s
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m INFO 08-25 01:20:50 utils.py:623] Found nccl from library libnccl.so.2
+INFO 08-25 01:20:50 pynccl.py:65] vLLM is using nccl==2.20.5
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m INFO 08-25 01:20:50 pynccl.py:65] vLLM is using nccl==2.20.5
+create comm takes: 0.06s
+WARNING 08-25 01:20:50 custom_all_reduce.py:179] Custom allreduce is disabled because your platform lacks GPU P2P capability or P2P test failed. To silence this warning, specify disable_custom_all_reduce=True explicitly.
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m create comm takes: 0.06s
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m WARNING 08-25 01:20:50 custom_all_reduce.py:179] Custom allreduce is disabled because your platform lacks GPU P2P capability or P2P test failed. To silence this warning, specify disable_custom_all_reduce=True explicitly.
+create ca comm takes: 0.00s
+INFO 08-25 01:20:50 multiproc_gpu_executor.py:171] Before liquid model weights, remaining space on GPU 0: 2.61 GB
+After sending shards, there are 9.24GB remaining on GPU0
+INFO 08-25 01:20:51 worker.py:151] send weights shards takes: 0.88s, sent out: 6.19GB, sent bw: 7.07GB/s
+INFO 08-25 01:20:51 multiproc_gpu_executor.py:177] After liquid model weights, remaining space on GPU 0: 9.24 GB
+INFO 08-25 01:20:52 cache_engine.py:108] send kvc shards takes: 0.88s, sent out: 7.38GB, sent bw: 8.42GB/s
+INFO 08-25 01:20:52 cache_engine.py:114] Successfully send kv cache shards: [1] to rank: 1
+INFO 08-25 01:20:52 multiproc_gpu_executor.py:194] After liquid model kvc, remaining space on GPU 0: 16.42 GB
+INFO 08-25 01:20:52 llm_engine.py:739] Completed! Move shard: [1] from 0 to 1;liquid e2e latency: 1.85s, update worker latency: 0.07s, liquid model weights latency: 0.88s, init mem latency: 0.00s, liquid kvc latency: 0.90s;
+Before liquid, remaining space on GPU 0: 16.41 GB
+INFO 08-25 01:20:52 multiproc_gpu_executor.py:158] Start to do liquid from src: 1 to dst: 0 with shard_ids: [1]
+destory group takes: 0.00s
+create new group takes: 0.00s
+create comm takes: 0.00s
+create ca comm takes: 0.00s
+INFO 08-25 01:20:52 multiproc_gpu_executor.py:171] Before liquid model weights, remaining space on GPU 0: 16.41 GB
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m create ca comm takes: 0.00s
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m destory group takes: 0.00s
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m create new group takes: 0.00s
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m After sending shards, there are 23.30GB remaining on GPU0
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m INFO 08-25 01:20:53 worker.py:151] send weights shards takes: 0.81s, sent out: 6.19GB, sent bw: 7.67GB/s
+INFO 08-25 01:20:53 multiproc_gpu_executor.py:177] After liquid model weights, remaining space on GPU 0: 10.26 GB
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m INFO 08-25 01:20:54 cache_engine.py:108] send kvc shards takes: 1.08s, sent out: 7.38GB, sent bw: 6.83GB/s
+[1;36m(VllmWorkerProcess pid=1172852)[0;0m INFO 08-25 01:20:54 cache_engine.py:114] Successfully send kv cache shards: [1] to rank: 0
+INFO 08-25 01:20:55 multiproc_gpu_executor.py:194] After liquid model kvc, remaining space on GPU 0: 2.63 GB
+INFO 08-25 01:20:55 llm_engine.py:739] Completed! Move shard: [1] from 1 to 0;liquid e2e latency: 2.25s, update worker latency: 0.01s, liquid model weights latency: 0.91s, init mem latency: 0.00s, liquid kvc latency: 1.32s;
+output: 
+Law school.
+oh, i thought it was some kind of acronym for something else.
+It's a common abbreviation for law school.
+i know, i just thought it was some kind of acronym for something else.
+It's a common abbreviation for law school.
+i know, i just thought it was some kind of acronym for something else.
+It's a common abbreviation for law school.
+i know, i just thought it was some kind of acronym for something else.
+It's a common abbreviation for law school.
+i know, i just thought it was some kind of acronym for
+INFO 08-25 01:21:00 multiproc_worker_utils.py:123] Killing local vLLM worker processes

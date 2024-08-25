@@ -43,7 +43,6 @@ from vllm.sequence import SamplerOutput
 from vllm.config import LiquidConfig
 
 
-
 class OPTLearnedPositionalEmbedding(nn.Embedding):
 
     def __init__(self, num_embeddings: int, embedding_dim: int):
@@ -384,10 +383,8 @@ class OPTForCausalLM(nn.Module):
         assert shard_id in self.shard_ids, f"{shard_id} not in the model"
         for name, param in self.named_parameters():
             if hasattr(param, "num_shards"):
-
-                # free_memory, total_memory = torch.cuda.mem_get_info()
-                # print(f"Inside opt liquid, param: {name}: There is still {free_memory/(1024**3):.2f} GB")
                 param.delete_shard(shard_id)
+                torch.cuda.empty_cache()
         
 
         for layer in self.model.decoder.layers:
@@ -419,7 +416,7 @@ class OPTForCausalLM(nn.Module):
             if name in shards_weights.keys():
                 assert hasattr(param, "shard_ids")
                 param.append_shard(shard_id, shards_weights[name])
-
+                del shards_weights[name]
         
         for layer in self.model.decoder.layers:
             layer.self_attn.attn.append_shard(shard_id)
