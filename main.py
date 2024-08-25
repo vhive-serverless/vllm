@@ -23,10 +23,11 @@ def main():
     shard_ids = [1]
     src = 0
     dst = 1
-    llm.do_liquid(shard_ids, src, dst)
-    llm.do_liquid(shard_ids, dst, src)
-    llm.do_liquid(shard_ids, src, dst)
-    llm.do_liquid(shard_ids, dst, src)
+    for i in range(100):
+        llm.do_liquid(shard_ids, src, dst)
+        llm.do_liquid(shard_ids, dst, src)
+    # llm.do_liquid(shard_ids, src, dst)
+    # llm.do_liquid(shard_ids, dst, src)
 
     sampling_params = SamplingParams(temperature=0, min_tokens=127, max_tokens=128)
     request_num = 1

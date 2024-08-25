@@ -316,6 +316,7 @@ class LLMEngine:
                     self.get_tokenizer_for_seq,
                 ),
             ))
+        self.liquid_count = 0
 
     def _initialize_kv_caches(self) -> None:
         """Initialize the KV cache in the worker(s).
@@ -736,7 +737,8 @@ class LLMEngine:
             liquid_request = self.liquid_request_queue.get()
             try:
                 liquid_output = self._do_liquid(liquid_request)
-                logger.info(f"{liquid_output}")
+                logger.info(f"Finished liquid for {self.liquid_count} times, output: {liquid_output}")
+                self.liquid_count += 1
             except Exception as e:
                 logger.error(f"Failed to perform liquid! error: {e}")
                 raise Exception(e)
@@ -793,7 +795,6 @@ class LLMEngine:
             >>>         break
         """
         self.check_liquid_request_and_complete()
-
         seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
 
         if not scheduler_outputs.is_empty():
