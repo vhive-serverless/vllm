@@ -1,19 +1,35 @@
-from dataclasses import dataclass
-from typing import List, Dict, Any, Optional
+from dataclasses import dataclass, field
+from typing import List, Dict, Any, Optional, Tuple
+from enum import Enum
+
+class LiquidType(Enum):
+    LIQUID_1_2 = 1
+    LIQUID_2_4 = 2
+    LIQUID_2_1 = 3
+    LIQUID_4_2 = 4
+
 
 @dataclass
 class LiquidRequest:
-    '''Request to perform liquid operation, will be sent to scheduler for scheduling
-    '''
-    shard_ids: List[int]
-    src: int
-    dst: int
+    liquid_type: LiquidType
+
+# @dataclass
+# class LiquidRequest:
+#     '''Request to perform liquid operation, will be sent to scheduler for scheduling
+#     '''
+#     shard_ids: List[int]
+#     src: int
+#     dst: int
+#     is_scale_out: bool
 
 @dataclass
 class LiquidOutput:
     shard_ids: List[int]
     src: int
     dst: int
+
+    # when scale in, need to move blocks, below is the mapping of src block number to dst block number
+    src_to_dsts: List[Tuple[int,int]] = field(default_factory=list)
     
     freed_memory_GB: Optional[float] = None
     liquid_e2e_latency: Optional[float] = None

@@ -1,4 +1,5 @@
 from vllm import LLM, SamplingParams
+from vllm.liquid.request import LiquidRequest, LiquidType
 # from vllm import EngineArgs, LLMEngine
 import asyncio
 
@@ -20,12 +21,12 @@ def main():
         liquid_total_num_shards = 2,
         # gpu_memory_utilization=0.7,
     )
-    shard_ids = [1]
-    src = 0
-    dst = 1
-    for i in range(100):
-        llm.do_liquid(shard_ids, src, dst)
-        llm.do_liquid(shard_ids, dst, src)
+    # for i in range(100):
+    liquid_request = LiquidRequest(LiquidType.LIQUID_1_2)
+    llm.do_liquid(liquid_request)
+    liquid_request = LiquidRequest(LiquidType.LIQUID_2_1)
+    llm.do_liquid(liquid_request)
+    # llm.do_liquid(shard_ids, dst, src, False)
     # llm.do_liquid(shard_ids, src, dst)
     # llm.do_liquid(shard_ids, dst, src)
 

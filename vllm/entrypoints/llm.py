@@ -523,8 +523,8 @@ class LLM:
                     lora_request, Sequence) else lora_request,
             )
 
-    def do_liquid(self, shard_ids: List[int], src: int, dst: int):
-       self.llm_engine.do_liquid(shard_ids, src, dst) 
+    def do_liquid(self, liquid_request):
+       self.llm_engine.do_liquid(liquid_request) 
 
     def _add_request(
         self,

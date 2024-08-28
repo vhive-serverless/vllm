@@ -40,7 +40,7 @@ from vllm.transformers_utils.tokenizer_group import (BaseTokenizerGroup,
 from vllm.usage.usage_lib import (UsageContext, is_usage_stats_enabled,
                                   usage_message)
 from vllm.utils import Counter
-from vllm.liquid.request import LiquidRequest, LiquidOutput
+from vllm.liquid.request import LiquidRequest, LiquidOutput, LiquidType
 
 logger = init_logger(__name__)
 _LOCAL_LOGGING_INTERVAL_SEC = 5
@@ -317,6 +317,7 @@ class LLMEngine:
                 ),
             ))
         self.liquid_count = 0
+
 
     def _initialize_kv_caches(self) -> None:
         """Initialize the KV cache in the worker(s).
@@ -725,12 +726,14 @@ class LLMEngine:
             request_outputs.append(request_output)
         return request_outputs
 
-    def do_liquid(self, shard_ids: List[int], src: int, dst: int):
-        liquid_request: LiquidRequest = LiquidRequest(shard_ids, src, dst)
+    def do_liquid(self, liquid_request):
         self.liquid_request_queue.put(liquid_request)
 
     def _do_liquid(self, liquid_request: LiquidRequest) -> LiquidOutput:
-        return self.model_executor.do_liquid(liquid_request)
+        block_ids = self.scheduler.get_sorted_block_ids()
+        liquid_output = self.model_executor.do_liquid(liquid_request, block_ids)
+        self.scheduler.update_gpu_blocks(self.cache_config.num_gpu_blocks, liquid_output.src_to_dsts)
+        return liquid_output
 
     def check_liquid_request_and_complete(self):
         if self.liquid_request_queue.qsize() != 0:
@@ -796,6 +799,10 @@ class LLMEngine:
         """
         self.check_liquid_request_and_complete()
         seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
+        for seq_group_metadata in seq_group_metadata_list:
+            block_table = seq_group_metadata.block_tables[0]
+            print(f"block_table: {block_table}")
+
 
         if not scheduler_outputs.is_empty():
             execute_model_req = ExecuteModelRequest(

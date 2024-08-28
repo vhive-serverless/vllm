@@ -44,6 +44,10 @@ class FlashAttentionBackend(AttentionBackend):
         return 3
 
     @staticmethod
+    def get_num_blocks_dim():
+        return 1
+
+    @staticmethod
     def swap_blocks(
         src_kv_cache: torch.Tensor,
         dst_kv_cache: torch.Tensor,

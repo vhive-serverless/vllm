@@ -22,6 +22,9 @@ class DistributedGPUExecutor(GPUExecutor):
         # to the _run_workers execute_model call
         self.extra_execute_model_run_workers_kwargs: Dict[str, Any] = {}
 
+        # Stack of num of gpu blocks, when scale out, put an item in, when scale in, pop that item out
+        self.num_gpu_blocks_stack : List[int] = []
+
         super().__init__(*args, **kwargs)
 
     def determine_num_available_blocks(self) -> Tuple[int, int]:
@@ -62,6 +65,8 @@ class DistributedGPUExecutor(GPUExecutor):
         self._run_workers("initialize_cache",
                           num_gpu_blocks=num_gpu_blocks,
                           num_cpu_blocks=num_cpu_blocks, only_active_workers=True)
+
+        self.num_gpu_blocks_stack.append(self.cache_config.num_gpu_blocks)
 
     def execute_model(
             self,

@@ -1,5 +1,5 @@
 """CacheEngine class for managing the KV cache."""
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 import torch
 
@@ -40,8 +40,8 @@ class CacheEngine:
 
         self.head_size = model_config.get_head_size()
         self.num_layers = model_config.get_num_layers(parallel_config)
-        self.num_kv_heads = model_config.get_num_kv_heads(parallel_config)
-        self.num_kv_heads = (self.num_kv_heads // total_num_shards) * current_num_shards
+        self.total_num_kv_heads = model_config.get_num_kv_heads(parallel_config)
+        self.num_kv_heads = (self.total_num_kv_heads // total_num_shards) * current_num_shards
 
         self.block_size = cache_config.block_size
         self.num_gpu_blocks = cache_config.num_gpu_blocks
@@ -97,6 +97,34 @@ class CacheEngine:
             kv_cache.append(cache)
         return kv_cache
 
+    def extend_gpu_blocks(self, num_gpu_blocks: int):
+        assert num_gpu_blocks > self.num_gpu_blocks
+        kv_cache_shape = self.attn_backend.get_kv_cache_shape(num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size)
+        for i in range(self.num_layers):
+            new_cache = torch.zeros(kv_cache_shape, dtype=self.dtype, pin_memory=False, device="cuda")
+            original_num_blocks = self.gpu_cache[i].size(1)
+            new_cache[:,:original_num_blocks, ...].copy_(self.gpu_cache[i])
+            self.gpu_cache[i].data = new_cache
+
+    def move_gpu_blocks(self, src_to_dsts: List[Tuple[int,int]]):
+        
+        blocks_to_copy = torch.tensor(src_to_dsts,
+                                      device="cuda",
+                                      dtype=torch.int64).view(-1, 2)
+        self.copy(blocks_to_copy)
+        
+
+    def shrink_gpu_blocks(self, src_to_dsts: List[Tuple[int,int]], num_gpu_blocks: int):
+        assert num_gpu_blocks < self.num_gpu_blocks
+        kv_cache_shape = self.attn_backend.get_kv_cache_shape(num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size)
+        for i in range(self.num_layers):
+            new_cache = torch.zeros(kv_cache_shape, dtype=self.dtype, pin_memory=False, device="cuda")
+            start_copied_block_number = num_gpu_blocks - len(src_to_dsts)
+            new_cache[:,start_copied_block_number:, ...] = self.gpu_cache[i][:,start_copied_block_number:num_gpu_blocks, ...]
+            self.gpu_cache[i].data = new_cache
+        
+        
+
     def send_shards(self, shard_ids: List[int], dst: int) -> int:
         shards_cache = self.get_shards(shard_ids)
         # print(f"sharded_weights.keys: {shards_weights.keys()}")
@@ -144,13 +172,23 @@ class CacheEngine:
         index = self.shard_ids.index(shard_id)
         self.shard_ids.pop(index)
 
+        total_num_shards = self.total_num_shards
+        current_num_shards = len(self.shard_ids)
+        self.num_kv_heads = (self.total_num_kv_heads // total_num_shards) * current_num_shards
+
     def load_shards(self,shard_ids: List[int], shards_data: Dict[str, torch.Tensor]):
         if len(shard_ids) > 1:
             raise NotImplementedError(f"get shard with length > 1 is not implemented yet")
         shard_id = shard_ids[0]
         assert shard_id in self.shard_ids
         for i, cache in enumerate(self.gpu_cache):
-            cache.copy_(shards_data[f"layer_{i}"])
+            data = shards_data.pop(f"layer_{i}")
+            cache.copy_(data)
+            del data
+
+        total_num_shards = self.total_num_shards
+        current_num_shards = len(self.shard_ids)
+        self.num_kv_heads = (self.total_num_kv_heads // total_num_shards) * current_num_shards
 
     def append_shards(self,shard_ids: List[int], shards_data: Dict[str, torch.Tensor]):
         if len(shard_ids) > 1:
@@ -163,6 +201,9 @@ class CacheEngine:
             del data
 
         self.shard_ids.append(shard_id)
+        total_num_shards = self.total_num_shards
+        current_num_shards = len(self.shard_ids)
+        self.num_kv_heads = (self.total_num_kv_heads // total_num_shards) * current_num_shards
 
 
     def swap_in(self, src_to_dst: torch.Tensor) -> None:
@@ -177,6 +218,28 @@ class CacheEngine:
 
     def copy(self, src_to_dsts: torch.Tensor) -> None:
         self.attn_backend.copy_blocks(self.gpu_cache, src_to_dsts)
+
+    def get_gpu_block_size(
+            self,
+            cache_config: CacheConfig,
+            model_config: ModelConfig,
+            parallel_config: ParallelConfig,
+
+    ) -> int:
+        current_num_shards = len(self.shard_ids)
+        head_size = model_config.get_head_size()
+        num_heads = int(model_config.get_num_kv_heads(parallel_config) * (current_num_shards / self.total_num_shards))
+        num_layers = model_config.get_num_layers(parallel_config)
+
+        key_cache_block = cache_config.block_size * num_heads * head_size
+        value_cache_block = key_cache_block
+        total = num_layers * (key_cache_block + value_cache_block)
+        if cache_config.cache_dtype == "auto":
+            dtype = model_config.dtype
+        else:
+            dtype = STR_DTYPE_TO_TORCH_DTYPE[cache_config.cache_dtype]
+        dtype_size = _get_dtype_size(dtype)
+        return dtype_size * total
 
     @staticmethod
     def get_cache_block_size(

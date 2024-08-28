@@ -151,15 +151,10 @@ class Worker(WorkerBase):
             logger.info(f"send weights shards takes: {send_latency:.2f}s, sent out: {bytes_sent/(1024**3):.2f}GB, sent bw: {sent_bandwidth:.2f}GB/s")
         else:
             if not hasattr(self.model_runner, "model"):
-                start = time.time()
                 self.model_runner.initialize_sharded_model(shard_ids)
-                print(f"init model takes: {time.time() - start:.2f}s")
-                start = time.time()
                 shards_weights = self.model_runner.recv_shards(shard_ids, src, only_sharded=False)
-                print(f"recv shards takes: {time.time() - start:.2f}s")
                 start = time.time()
                 self.model_runner.model.load_shards_weights(shard_ids,shards_weights)
-                print(f"load shards takes: {time.time() - start:.2f}s")
             else:
                 shards_weights = self.model_runner.recv_shards(shard_ids, src, only_sharded=True)
                 self.model_runner.model.append_shards_weights(shard_ids, 
@@ -169,14 +164,39 @@ class Worker(WorkerBase):
             del shards_weights
             torch.cuda.empty_cache()
 
-    def update_cache(self, num_gpu_blocks: int, num_cpu_blocks: int, shard_ids: List[int]):
-        if hasattr(self, "cache_engine"):
-            if self.cache_engine.num_gpu_blocks == num_gpu_blocks:
-                return
-        else:
+    def init_cache(self, num_gpu_blocks: int, shard_ids):
+        if not hasattr(self, "cache_engine"):
             self.cache_config.num_gpu_blocks = num_gpu_blocks
-            self.cache_config.num_cpu_blocks = num_cpu_blocks
+            self.cache_config.num_cpu_blocks = 1
             self._init_cache_engine(shard_ids)
+
+    def determine_num_new_gpu_blocks(self) -> int:
+        torch.cuda.empty_cache()
+        # Calculate the number of blocks that can be allocated with the
+        # profiled peak memory.
+        torch.cuda.synchronize()
+        free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
+        # NOTE(woosuk): Here we assume that the other processes using the same
+        # GPU did not change their memory usage during the profiling.
+        peak_memory = self.init_gpu_memory - free_gpu_memory
+        assert peak_memory > 0, (
+            "Error in memory profiling. This happens when the GPU memory was "
+            "not properly cleaned up before initializing the vLLM instance.")
+
+        cache_block_size = self.get_gpu_block_size_bytes()
+        num_gpu_blocks = int(
+            (total_gpu_memory * self.cache_config.gpu_memory_utilization -
+             peak_memory) // cache_block_size)
+        return num_gpu_blocks
+
+    def extend_gpu_blocks(self, num_gpu_blocks: int):
+        self.cache_engine.extend_gpu_blocks(num_gpu_blocks)
+        self.cache_config.num_gpu_blocks = num_gpu_blocks
+
+    def move_and_shrink_gpu_blocks(self, src_to_dsts: List[Tuple[int,int]], num_gpu_blocks: int):
+        self.cache_engine.move_gpu_blocks(src_to_dsts)
+        self.cache_engine.shrink_gpu_blocks(src_to_dsts, num_gpu_blocks)
+
 
     def liquid_kv_cache(self, shard_ids: List[int], src: int, dst: int, load_kv_cache):
         assert self.rank == src or self.rank == dst
@@ -186,10 +206,8 @@ class Worker(WorkerBase):
             start = time.time()
             shards_cache = self.cache_engine.recv_shards(shard_ids, src)
             if load_kv_cache:
+                
                 self.cache_engine.load_shards(shard_ids,shards_cache)
-                for name, cache in shards_cache.items():
-                    del cache
-                del shards_cache
             else:
                 self.cache_engine.append_shards(shard_ids, shards_cache)
             torch.cuda.empty_cache()
@@ -432,12 +450,16 @@ class Worker(WorkerBase):
     def vocab_size(self) -> int:
         return self.model_runner.vocab_size
 
+    def get_gpu_block_size_bytes(self) -> int:
+        return self.cache_engine.get_gpu_block_size(self.cache_config, self.model_config, self.parallel_config)
+
     def get_cache_block_size_bytes(self) -> int:
         """Get the size of the KV cache block size in bytes.
         """
         return CacheEngine.get_cache_block_size(self.cache_config,
                                                 self.model_config,
-                                                self.parallel_config)
+                                                self.parallel_config,
+                                                )
 
 
 def init_worker_distributed_environment(
