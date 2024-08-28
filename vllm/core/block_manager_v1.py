@@ -179,6 +179,20 @@ class UncachedBlockAllocator(BlockAllocatorBase):
                                        num_hashed_tokens=0)
             self.free_blocks.append(block)
 
+    def update_gpu_blocks(self, num_gpu_blocks: int):
+        if num_gpu_blocks > self.num_blocks:
+            for i in range(self.num_blocks, num_gpu_blocks):
+                block = PhysicalTokenBlock(device=self.device,
+                                            block_number=i,
+                                            block_size=self.block_size,
+                                            block_hash=-1,
+                                            num_hashed_tokens=0
+                                            )
+                self.free_blocks.append(block) 
+
+        else:
+            raise NotImplementedError(f"shrink gpu blocks not implemented yet")
+
     def allocate(self,
                  block_hash: Optional[int] = None,
                  num_hashed_tokens: int = 0) -> PhysicalTokenBlock:
@@ -700,3 +714,21 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         if self.enable_caching:
             for seq in seq_group.seqs_dict.values():
                 self.compute_full_blocks_in_seq(seq)
+
+    def update_gpu_blocks(self, num_gpu_blocks: int):
+        self.gpu_allocator.update_gpu_blocks(num_gpu_blocks)
+
+    def move_blocks(self, seq_id: int, src_to_dst_map: Dict[int,int]):
+        block_table = self.block_tables[seq_id]
+        for physical_block in block_table:
+            if physical_block.block_number in src_to_dst_map.keys():
+                physical_block.block_number = src_to_dst_map[physical_block.block_number]
+
+
+    def get_all_blocks(self) -> List[int]:
+        block_ids = []
+        for seq_id, block_table in self.block_tables.items():
+            for block in block_table:
+                block_ids.append(block.block_number)
+        return block_ids
+            

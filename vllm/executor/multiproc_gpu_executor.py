@@ -2,7 +2,7 @@ import asyncio
 import os
 import torch
 from functools import partial
-from typing import Any, List, Optional, Dict, Set
+from typing import Any, List, Optional, Dict, Set, Tuple
 
 from vllm.executor.distributed_gpu_executor import (  # yapf: disable
     DistributedGPUExecutor, DistributedGPUExecutorAsync)
@@ -12,7 +12,7 @@ from vllm.logger import init_logger
 from vllm.sequence import ExecuteModelRequest, SamplerOutput
 from vllm.utils import (get_distributed_init_method, get_ip, get_open_port,
                         get_vllm_instance_id, make_async)
-from vllm.liquid.request import LiquidRequest, LiquidOutput
+from vllm.liquid.request import LiquidRequest, LiquidOutput, LiquidType
 from vllm.liquid.liquid_worker_info import LiquidWorkerInfo
 import time
 
@@ -144,12 +144,57 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
     def get_worker_by_rank(self, rank: int):
         return self.rank_worker_info_map[rank].worker
 
-    def do_liquid(self, liquid_request: LiquidRequest) -> LiquidOutput:
+    def do_liquid(self, liquid_request: LiquidRequest, block_ids: List[int]) -> LiquidOutput:
+        liquid_type = liquid_request.liquid_type
+        if liquid_type == LiquidType.LIQUID_1_2:
+            src = 0
+            dst = 1
+            shard_ids = list(range(self.liquid_config.liquid_total_num_shards))
+            moved_length = int(self.liquid_config.liquid_total_num_shards / 2)
+            moved_shard_ids = shard_ids[moved_length:]
+            self.update_worker_info_map(src, dst, moved_shard_ids)
+            active_ranks = self.get_active_ranks()
+            self.update_active_ranks(active_ranks)
+            liquid_output = self.data_transmission(src, dst, moved_shard_ids, is_scale_out=True)
+
+            num_new_gpu_blocks_list = self._run_workers("determine_num_new_gpu_blocks", only_active_workers=True)
+            num_new_gpu_blocks = min(num_new_gpu_blocks_list)
+            self.cache_config.num_gpu_blocks += num_new_gpu_blocks
+            self.num_gpu_blocks_stack.append(self.cache_config.num_gpu_blocks)
+
+            logger.info(f"After scale out, num_gpu_blocks: {self.cache_config.num_gpu_blocks}")
+            self._run_workers("extend_gpu_blocks", self.cache_config.num_gpu_blocks)
+
+        elif liquid_type == LiquidType.LIQUID_2_1:
+            src = 1
+            dst = 0
+            shard_ids = list(range(self.liquid_config.liquid_total_num_shards))
+            moved_length = self.liquid_config.liquid_total_num_shards / 2
+            moved_shard_ids = shard_ids[moved_length:]
+            self.update_worker_info_map(src, dst, moved_shard_ids)
+            active_ranks = self.get_active_ranks()
+            self.update_active_ranks(active_ranks)
+            self.num_gpu_blocks_stack.pop()
+            num_gpu_blocks = self.num_gpu_blocks_stack[-1] # Get the last element in the stack
+
+            # create src to dst block mapping
+            src_to_dsts: List[Tuple[int,int]] = []
+            num_src_blocks = len(block_ids)
+            for i, src_block_id in enumerate(block_ids):
+                dst_block_id = num_gpu_blocks - (num_src_blocks - i)
+                src_to_dsts.append(src_block_id,dst_block_id)   
+            liquid_output.src_to_dsts = src_to_dsts
+
+            self._run_workers("move_and_shrink_gpu_blocks", src_to_dsts=src_to_dsts, num_gpu_blocks=num_gpu_blocks, worker_ranks=[src, dst])
+            self.cache_config.num_gpu_blocks = num_gpu_blocks
+            liquid_output = self.data_transmission(dst, src, [2,3], is_scale_out=False)
+
+        return liquid_output
+
+
+    def data_transmission(self, src: int, dst: int, shard_ids: List[int], is_scale_out) -> LiquidOutput:
         free_memory, total_memory = torch.cuda.mem_get_info()
         print(f"Before liquid, remaining space on GPU 0: {free_memory/(1024**3):.2f} GB")
-        shard_ids = liquid_request.shard_ids
-        src = liquid_request.src
-        dst = liquid_request.dst
         liquid_output = LiquidOutput(shard_ids, src, dst)
         liquid_output.liquid_start = time.time()
         # check if the src is active
@@ -157,10 +202,10 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         assert src in active_ranks, f"liquid src: {src} is not active!"
         logger.info(f"Start to do liquid from src: {src} to dst: {dst} with shard_ids: {shard_ids}")
 
-        group_member_change = self.update_worker_info_map(src, dst, shard_ids)
-        if group_member_change:
-            active_ranks = self.get_active_ranks()
-            self.update_active_ranks(active_ranks)
+        # group_member_change = self.update_worker_info_map(src, dst, shard_ids)
+        # if group_member_change:
+        #     active_ranks = self.get_active_ranks()
+        #     self.update_active_ranks(active_ranks)
         liquid_output.finished_update_workers = time.time()
         
         # load the shard data(model weights) in liquid mode
@@ -175,17 +220,11 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         torch.cuda.empty_cache()
         free_memory, total_memory = torch.cuda.mem_get_info()
         logger.info(f"After liquid model weights, remaining space on GPU 0: {free_memory/(1024**3):.2f} GB")
-        # update the cache engine on dst
-        # TODO: recalculates the number of gpu blocks and cpu blocks, currently just keep the same number
-        num_gpu_blocks = self.cache_config.num_gpu_blocks
-        num_cpu_blocks = 1
-        self._run_workers("update_cache",
-                          num_gpu_blocks=num_gpu_blocks,
-                          num_cpu_blocks=num_cpu_blocks, 
-                          shard_ids = shard_ids,
-                          worker_ranks=[src, dst])
         liquid_output.finished_init_mem = time.time()
+
         # if dst has not initialize, then kv cache should be loaded, otherwise it should be appended
+        num_gpu_blocks = self.cache_config.num_gpu_blocks
+        self._run_worker("init_cache", num_gpu_blocks=num_gpu_blocks, shard_ids=shard_ids, rank=dst)
         load_kv_cache = not self.rank_worker_info_map[dst].initialized
         self._run_workers("liquid_kv_cache", shard_ids=shard_ids, src=src, dst=dst, load_kv_cache = load_kv_cache, worker_ranks=[src, dst])
         liquid_output.finished_liquid_kvc = time.time()

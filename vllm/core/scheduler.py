@@ -1201,3 +1201,22 @@ class Scheduler:
             num_new_tokens = min(num_new_tokens,
                                  budget.remaining_token_budget())
         return num_new_tokens
+
+
+    def update_gpu_blocks(self, num_gpu_blocks: int, src_to_dsts: List[Tuple[int,int]]):
+        self.block_manager.update_gpu_blocks(num_gpu_blocks)
+        if src_to_dsts == []: return
+
+        src_to_dst_map = {}
+        for src, dst in src_to_dsts:
+            src_to_dst_map[src] = dst
+
+        for seq_group in self.running:
+            for seq_id, _ in seq_group.seqs_dict.items():
+                self.block_manager.move_blocks(seq_id, src_to_dst_map)
+            
+
+    def get_sorted_block_ids(self) -> List[int]:
+        block_ids = self.block_manager.get_all_blocks()
+        block_ids.sort()
+        return block_ids
