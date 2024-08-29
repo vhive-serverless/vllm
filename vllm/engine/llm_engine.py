@@ -799,9 +799,9 @@ class LLMEngine:
         """
         self.check_liquid_request_and_complete()
         seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
-        for seq_group_metadata in seq_group_metadata_list:
-            block_table = seq_group_metadata.block_tables[0]
-            print(f"block_table: {block_table}")
+        # for seq_group_metadata in seq_group_metadata_list:
+        #     block_table = seq_group_metadata.block_tables[0]
+        #     print(f"block_table: {block_table}")
 
 
         if not scheduler_outputs.is_empty():
