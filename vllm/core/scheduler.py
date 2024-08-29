@@ -1027,6 +1027,9 @@ class Scheduler:
         self.block_manager.free(seq)
 
     def free_finished_seq_groups(self) -> None:
+        for seq_group in self.running:
+            if seq_group.is_finished():
+                logger.info(f"Sequence {seq_group.request_id} is finished!")
         self.running = deque(seq_group for seq_group in self.running
                              if not seq_group.is_finished())
 
