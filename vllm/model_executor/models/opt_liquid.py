@@ -406,6 +406,7 @@ class OPTForCausalLM(nn.Module):
                 param.data.copy_(shards_weights[name])
 
         self.model.decoder.embed_tokens.update_sharded_indices(shard_ids=self.shard_ids, total_num_shards=self.total_num_shards)
+        # self.shard_ids.append(shard_id)
 
     def append_shards_weights(self, shard_ids: List[int], shards_weights: Dict[str, torch.Tensor]):
         if len(shard_ids) > 1:
