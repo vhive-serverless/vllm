@@ -105,6 +105,7 @@ class CacheEngine:
             original_num_blocks = self.gpu_cache[i].size(1)
             new_cache[:,:original_num_blocks, ...].copy_(self.gpu_cache[i])
             self.gpu_cache[i].data = new_cache
+        self.num_gpu_blocks = num_gpu_blocks
 
     def move_gpu_blocks(self, src_to_dsts: List[Tuple[int,int]]):
         
@@ -122,7 +123,7 @@ class CacheEngine:
             start_copied_block_number = num_gpu_blocks - len(src_to_dsts)
             new_cache[:,start_copied_block_number:, ...] = self.gpu_cache[i][:,start_copied_block_number:num_gpu_blocks, ...]
             self.gpu_cache[i].data = new_cache
-        
+        self.num_gpu_blocks = num_gpu_blocks 
         
 
     def send_shards(self, shard_ids: List[int], dst: int) -> int:

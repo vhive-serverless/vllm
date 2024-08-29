@@ -179,7 +179,7 @@ class UncachedBlockAllocator(BlockAllocatorBase):
                                        num_hashed_tokens=0)
             self.free_blocks.append(block)
 
-    def update_gpu_blocks(self, num_gpu_blocks: int):
+    def update_gpu_blocks(self, num_gpu_blocks: int, free_gpu_end: int):
         if num_gpu_blocks > self.num_blocks:
             for i in range(self.num_blocks, num_gpu_blocks):
                 block = PhysicalTokenBlock(device=self.device,
@@ -191,7 +191,8 @@ class UncachedBlockAllocator(BlockAllocatorBase):
                 self.free_blocks.append(block) 
 
         else:
-            raise NotImplementedError(f"shrink gpu blocks not implemented yet")
+            self.free_blocks = [free_block for free_block in self.free_blocks if free_block.block_number < free_gpu_end]
+
 
     def allocate(self,
                  block_hash: Optional[int] = None,
@@ -715,8 +716,8 @@ class BlockSpaceManagerV1(BlockSpaceManager):
             for seq in seq_group.seqs_dict.values():
                 self.compute_full_blocks_in_seq(seq)
 
-    def update_gpu_blocks(self, num_gpu_blocks: int):
-        self.gpu_allocator.update_gpu_blocks(num_gpu_blocks)
+    def update_gpu_blocks(self, num_gpu_blocks: int, free_blocks_end: int):
+        self.gpu_allocator.update_gpu_blocks(num_gpu_blocks, free_blocks_end)
 
     def move_blocks(self, seq_id: int, src_to_dst_map: Dict[int,int]):
         block_table = self.block_tables[seq_id]

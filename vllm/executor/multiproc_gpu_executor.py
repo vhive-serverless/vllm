@@ -169,7 +169,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             src = 1
             dst = 0
             shard_ids = list(range(self.liquid_config.liquid_total_num_shards))
-            moved_length = self.liquid_config.liquid_total_num_shards / 2
+            moved_length = int(self.liquid_config.liquid_total_num_shards / 2)
             moved_shard_ids = shard_ids[moved_length:]
             self.update_worker_info_map(src, dst, moved_shard_ids)
             active_ranks = self.get_active_ranks()
@@ -182,12 +182,12 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             num_src_blocks = len(block_ids)
             for i, src_block_id in enumerate(block_ids):
                 dst_block_id = num_gpu_blocks - (num_src_blocks - i)
-                src_to_dsts.append(src_block_id,dst_block_id)   
-            liquid_output.src_to_dsts = src_to_dsts
+                src_to_dsts.append((src_block_id,dst_block_id))   
 
             self._run_workers("move_and_shrink_gpu_blocks", src_to_dsts=src_to_dsts, num_gpu_blocks=num_gpu_blocks, worker_ranks=[src, dst])
             self.cache_config.num_gpu_blocks = num_gpu_blocks
-            liquid_output = self.data_transmission(dst, src, [2,3], is_scale_out=False)
+            liquid_output = self.data_transmission(src, dst, moved_shard_ids, is_scale_out=False)
+            liquid_output.src_to_dsts = src_to_dsts
 
         return liquid_output
 
@@ -198,8 +198,8 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         liquid_output = LiquidOutput(shard_ids, src, dst)
         liquid_output.liquid_start = time.time()
         # check if the src is active
-        active_ranks = self.get_active_ranks()
-        assert src in active_ranks, f"liquid src: {src} is not active!"
+        # active_ranks = self.get_active_ranks()
+        # assert src in active_ranks, f"liquid src: {src} is not active!"
         logger.info(f"Start to do liquid from src: {src} to dst: {dst} with shard_ids: {shard_ids}")
 
         # group_member_change = self.update_worker_info_map(src, dst, shard_ids)
