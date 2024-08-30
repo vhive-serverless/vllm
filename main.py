@@ -22,9 +22,11 @@ def main():
         # gpu_memory_utilization=0.7,
     )
     # for i in range(100):
-    # liquid_request = LiquidRequest(LiquidType.LIQUID_1_2)
-    # llm.do_liquid(liquid_request)
+    liquid_request = LiquidRequest(LiquidType.LIQUID_1_2)
+    llm.do_liquid(liquid_request)
     # liquid_request = LiquidRequest(LiquidType.LIQUID_2_1)
+    # llm.do_liquid(liquid_request)
+    # liquid_request = LiquidRequest(LiquidType.LIQUID_1_2)
     # llm.do_liquid(liquid_request)
     # llm.do_liquid(shard_ids, dst, src, False)
     # llm.do_liquid(shard_ids, src, dst)
@@ -32,8 +34,8 @@ def main():
 
     sampling_params = SamplingParams(temperature=0, min_tokens=127, max_tokens=128)
     request_num = 1
-    word = "what is LLM?"
-    prompt = word * 1
+    word = "what is LLM?" 
+    prompt = word * 200
     inputs = [prompt for _ in range(request_num)]
     for request_id in range(request_num):
         output = llm.generate(inputs, sampling_params=sampling_params)
@@ -42,5 +44,5 @@ def main():
 
         
 
-# if __name__ == '__main__':
-#     main()
+if __name__ == '__main__':
+    main()

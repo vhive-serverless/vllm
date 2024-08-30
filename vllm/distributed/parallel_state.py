@@ -204,7 +204,7 @@ def init_distributed_environment(
 
         global LIQUID_COMMUNICATOR, TCP_STORE_PORT
         LIQUID_COMMUNICATOR = LiquidCommunicator(
-            buffer_size_gb=0.5,
+            buffer_size_gb=0.2,
             group=_DEVICE_WORLD_GROUP,
             tcp_store_port=TCP_STORE_PORT,
             dtype=dtype,

@@ -163,7 +163,10 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             self.num_gpu_blocks_stack.append(self.cache_config.num_gpu_blocks)
 
             logger.info(f"After scale out, num_gpu_blocks: {self.cache_config.num_gpu_blocks}")
+            start = time.time()
             self._run_workers("extend_gpu_blocks", self.cache_config.num_gpu_blocks)
+            extend_gpu_latency = time.time() - start
+            print(f"extending gpu blocks takes: {extend_gpu_latency:.2f}s")
 
         elif liquid_type == LiquidType.LIQUID_2_1:
             src = 1
@@ -217,6 +220,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         self._run_workers("liquid_model_weights", shard_ids=shard_ids, src=src, dst=dst, only_send_sharded_weights=only_send_sharded_weights, worker_ranks=[src, dst])
         liquid_output.finished_liquid_model_weights = time.time()
 
+        torch.cuda.synchronize()
         torch.cuda.empty_cache()
         free_memory, total_memory = torch.cuda.mem_get_info()
         logger.info(f"After liquid model weights, remaining space on GPU 0: {free_memory/(1024**3):.2f} GB")

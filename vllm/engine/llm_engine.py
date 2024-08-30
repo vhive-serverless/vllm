@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, ClassVar, Iterable, List, Optional
 from typing import Sequence as GenericSequence
 from typing import Type, TypeVar, Union
 from queue import Queue
+import torch
 import threading
 
 from transformers import GenerationConfig, PreTrainedTokenizer
@@ -41,6 +42,8 @@ from vllm.usage.usage_lib import (UsageContext, is_usage_stats_enabled,
                                   usage_message)
 from vllm.utils import Counter
 from vllm.liquid.request import LiquidRequest, LiquidOutput, LiquidType
+from vllm.liquid.auto_scaler import AutoScaler
+from queue import Queue
 
 logger = init_logger(__name__)
 _LOCAL_LOGGING_INTERVAL_SEC = 5
@@ -217,6 +220,8 @@ class LLMEngine:
         self.liquid_config = liquid_config
         self.liquid_request_queue: Queue[LiquidRequest] = Queue() 
         self.execution_lock: threading.Lock = threading.Lock()
+        self.auto_scaler = AutoScaler(liquid_config=liquid_config)
+        self.request_output_queue: Queue[RequestOutput] = Queue()
 
         if not self.model_config.skip_tokenizer_init:
             self.tokenizer = self._init_tokenizer()
@@ -724,6 +729,10 @@ class LLMEngine:
         for seq_group in ignored_seq_groups:
             request_output = RequestOutputFactory.create(seq_group)
             request_outputs.append(request_output)
+
+        for request_output in request_outputs:
+            if request_output.finished:
+                self.request_output_queue.put(request_output)
         return request_outputs
 
     def do_liquid(self, liquid_request):
@@ -731,7 +740,10 @@ class LLMEngine:
 
     def _do_liquid(self, liquid_request: LiquidRequest) -> LiquidOutput:
         block_ids = self.scheduler.get_sorted_block_ids()
+        start = time.time()
         liquid_output = self.model_executor.do_liquid(liquid_request, block_ids)
+        do_liquid_latency = time.time() - start
+        print(f"do_liquid latency: {do_liquid_latency:.2f}s")
         self.scheduler.update_gpu_blocks(self.cache_config.num_gpu_blocks, liquid_output.src_to_dsts)
         return liquid_output
 
@@ -797,7 +809,15 @@ class LLMEngine:
             >>>     if not (engine.has_unfinished_requests() or example_inputs):
             >>>         break
         """
+        cache_usage = self.get_latest_metrics().gpu_cache_usage
+        liquid_request = self.auto_scaler.step(cache_usage)
+        if liquid_request is not None:
+            self.liquid_request_queue.put(liquid_request)
+
+        start = time.time()
         self.check_liquid_request_and_complete()
+        liquid_latency = time.time() - start
+        # print(f"liquid_latency: {liquid_latency:.2f}s")
         seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
         # for seq_group_metadata in seq_group_metadata_list:
         #     block_table = seq_group_metadata.block_tables[0]
