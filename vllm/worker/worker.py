@@ -190,7 +190,10 @@ class Worker(WorkerBase):
         return num_gpu_blocks
 
     def extend_gpu_blocks(self, num_gpu_blocks: int):
+        start = time.time()
         self.cache_engine.extend_gpu_blocks(num_gpu_blocks)
+        extend_latency = time.time() - start
+        logger.info(f"extend gpu in worker takes: {extend_latency:.2f}s")
         self.cache_config.num_gpu_blocks = num_gpu_blocks
 
     def move_and_shrink_gpu_blocks(self, src_to_dsts: List[Tuple[int,int]], num_gpu_blocks: int):

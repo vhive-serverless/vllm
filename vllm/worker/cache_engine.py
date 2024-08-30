@@ -100,12 +100,28 @@ class CacheEngine:
     def extend_gpu_blocks(self, num_gpu_blocks: int):
         assert num_gpu_blocks > self.num_gpu_blocks
         kv_cache_shape = self.attn_backend.get_kv_cache_shape(num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size)
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        free_mem, _ = torch.cuda.mem_get_info()
+        print(f"available space before allocating GPU: {free_mem/(1024**2):.1f}MB")
         for i in range(self.num_layers):
-            new_cache = torch.zeros(kv_cache_shape, dtype=self.dtype, pin_memory=False, device="cuda")
+            start = time.time()
+            new_cache = torch.empty(kv_cache_shape, dtype=self.dtype, pin_memory=False, device="cuda")
+            torch.cuda.synchronize()
+            allocate_latency = time.time() - start
+            print(f"allocate tensor for layer {i}, when extend takes: {allocate_latency:.3f}s, tensor shape: {new_cache.shape}, tensor.dtype: {new_cache.dtype}")
             original_num_blocks = self.gpu_cache[i].size(1)
             new_cache[:,:original_num_blocks, ...].copy_(self.gpu_cache[i])
             self.gpu_cache[i].data = new_cache
+
+            torch.cuda.synchronize()
+            # free_mem, _ = torch.cuda.mem_get_info()
+            # print(f"available space on after layer: {i} GPU: {free_mem/(1024**2):.1f}MB")
+            # torch.cuda.empty_cache()
         self.num_gpu_blocks = num_gpu_blocks
+        torch.cuda.empty_cache()
+        free_mem, _ = torch.cuda.mem_get_info()
+        print(f"available space after allocating GPU: {free_mem/(1024**2):.1f}MB")
 
     def move_gpu_blocks(self, src_to_dsts: List[Tuple[int,int]]):
         
@@ -119,7 +135,11 @@ class CacheEngine:
         assert num_gpu_blocks < self.num_gpu_blocks
         kv_cache_shape = self.attn_backend.get_kv_cache_shape(num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size)
         for i in range(self.num_layers):
+            start = time.time()
             new_cache = torch.zeros(kv_cache_shape, dtype=self.dtype, pin_memory=False, device="cuda")
+            allocate_latency = time.time() - start
+            print(f"allocate tensor when shrink takes: {allocate_latency:.3f}s, tensor shape: {new_cache.shape}")
+
             start_copied_block_number = num_gpu_blocks - len(src_to_dsts)
             new_cache[:,start_copied_block_number:, ...] = self.gpu_cache[i][:,start_copied_block_number:num_gpu_blocks, ...]
             self.gpu_cache[i].data = new_cache
