@@ -11,6 +11,7 @@ from vllm.liquid.sharded_tensor import ShardedTensor
 from vllm.liquid.utils import send_dict, receive_dict
 from vllm.distributed.communication_op import get_liquid_communicator, get_device_world_group,get_tensor_model_parallel_group, get_tensor_model_parallel_cpu_group
 import time
+import gc
 
 logger = init_logger(__name__)
 
@@ -104,20 +105,31 @@ class CacheEngine:
         torch.cuda.synchronize()
         free_mem, _ = torch.cuda.mem_get_info()
         print(f"available space before allocating GPU: {free_mem/(1024**2):.1f}MB")
+        last_free_mem = free_mem
         for i in range(self.num_layers):
             start = time.time()
             new_cache = torch.empty(kv_cache_shape, dtype=self.dtype, pin_memory=False, device="cuda")
-            torch.cuda.synchronize()
-            allocate_latency = time.time() - start
-            print(f"allocate tensor for layer {i}, when extend takes: {allocate_latency:.3f}s, tensor shape: {new_cache.shape}, tensor.dtype: {new_cache.dtype}")
+            # torch.cuda.synchronize()
             original_num_blocks = self.gpu_cache[i].size(1)
             new_cache[:,:original_num_blocks, ...].copy_(self.gpu_cache[i])
+            # shard_ids = self.gpu_cache[i].shard_ids
+            # shard_dim = self.gpu_cache[i].shard_dim
+            # num_shards = self.gpu_cache[i].total_num_shards
+            # print(f"original tensor's shape: {self.gpu_cache[i].data.shape}")
             self.gpu_cache[i].data = new_cache
-
+            # self.gpu_cache[i].data = torch.empty(0)
+            # del self.gpu_cache[i]
+            # self.gpu_cache[i] = ShardedTensor(data=new_cache, shard_ids = shard_ids, num_shards=num_shards, shard_dim=shard_dim)
             torch.cuda.synchronize()
-            # free_mem, _ = torch.cuda.mem_get_info()
-            # print(f"available space on after layer: {i} GPU: {free_mem/(1024**2):.1f}MB")
-            # torch.cuda.empty_cache()
+            torch.cuda.empty_cache()
+            gc.collect()
+            
+
+            # torch.cuda.synchronize()
+            free_mem, _ = torch.cuda.mem_get_info()
+            decreased_free_mem = last_free_mem - free_mem 
+            last_free_mem = free_mem
+            # print(f"After extending layer {i}, free mem decreased is: {decreased_free_mem/(1024**2):.3f} MB!")
         self.num_gpu_blocks = num_gpu_blocks
         torch.cuda.empty_cache()
         free_mem, _ = torch.cuda.mem_get_info()
@@ -138,11 +150,12 @@ class CacheEngine:
             start = time.time()
             new_cache = torch.zeros(kv_cache_shape, dtype=self.dtype, pin_memory=False, device="cuda")
             allocate_latency = time.time() - start
-            print(f"allocate tensor when shrink takes: {allocate_latency:.3f}s, tensor shape: {new_cache.shape}")
+            # print(f"allocate tensor when shrink takes: {allocate_latency:.3f}s, tensor shape: {new_cache.shape}")
 
             start_copied_block_number = num_gpu_blocks - len(src_to_dsts)
             new_cache[:,start_copied_block_number:, ...] = self.gpu_cache[i][:,start_copied_block_number:num_gpu_blocks, ...]
             self.gpu_cache[i].data = new_cache
+            torch.cuda.empty_cache()
         self.num_gpu_blocks = num_gpu_blocks 
         
 
@@ -158,7 +171,7 @@ class CacheEngine:
         for name, cache in shards_cache.items():
             del cache
         del shards_cache
-        # torch.cuda.empty_cache()
+        torch.cuda.empty_cache()
         self.delete_shards(shard_ids)
         logger.info(f"Successfully send kv cache shards: {shard_ids} to rank: {dst}")
         return bytes_sent
@@ -184,8 +197,27 @@ class CacheEngine:
         if len(shard_ids) > 1:
             raise NotImplementedError(f"delete shard with length > 1 is not implemented yet")
         shard_id = shard_ids[0]
-        for cache in self.gpu_cache:
+        torch.cuda.empty_cache()
+        free_mem,_ = torch.cuda.mem_get_info()
+        latest_free_mem = free_mem
+        logger.info(f"After deleting layer's shard, free mem: {free_mem/(1024**2):.2f}MB")
+        for i, cache in enumerate(self.gpu_cache):
             cache.delete_shard(shard_id) 
+            # torch.cuda.empty_cache()
+            # free_mem,_ = torch.cuda.mem_get_info()
+            # logger.info(f"After deleting layer's shard, free mem increased by: {(free_mem - latest_free_mem)/(1024**2):.2f}MB")
+            # latest_free_mem = free_mem
+            # if i % 4 == 0:
+            torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        
+        # for cache in self.gpu_cache:
+        #     cache.data = torch.empty(0)
+        #     torch.cuda.empty_cache()
+        #     free_mem,_ = torch.cuda.mem_get_info()
+        #     logger.info(f"After delete layer, free mem increased by: {(free_mem - latest_free_mem)/(1024**2):.2f}MB")
+        #     latest_free_mem = free_mem
         # TODO: handle cpu cache
         # for cache in self.cpu_cache:
         #     cache.delete_shard(shard_id)
@@ -220,6 +252,7 @@ class CacheEngine:
             data = shards_data.pop(f"layer_{i}")
             cache.append_shard(shard_id, data)
             del data
+            torch.cuda.empty_cache()
 
         self.shard_ids.append(shard_id)
         total_num_shards = self.total_num_shards

@@ -41,6 +41,7 @@ from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.sequence import SamplerOutput
 from vllm.config import LiquidConfig
+from vllm.liquid.sharded_parameter import ShardedParameter, QKVShardedParameter
 
 
 class OPTLearnedPositionalEmbedding(nn.Embedding):
@@ -368,7 +369,12 @@ class OPTForCausalLM(nn.Module):
         shard_id = shard_ids[0]
         assert shard_id in self.shard_ids, f"{shard_id} not in the model"
         for name, param in self.named_parameters():
-            if hasattr(param, "shard_ids"):
+            if isinstance(param, QKVShardedParameter):
+                q_shard, k_shard, v_shard = param.get_shard(shard_id)
+                results[f"{name}_q"] = q_shard
+                results[f"{name}_k"] = k_shard
+                results[f"{name}_v"] = v_shard
+            elif isinstance(param, ShardedParameter):
                 results[name] = param.get_shard(shard_id)
             else:
                 if not only_sharded:
@@ -402,8 +408,17 @@ class OPTForCausalLM(nn.Module):
         shard_id = shard_ids[0]
         assert shard_id in self.shard_ids, f"{shard_id} not in the model"
         for name, param in self.named_parameters():
-            if name in shards_weights.keys():
+            if isinstance(param, QKVShardedParameter):
+                q_shard = shards_weights[f"{name}_q"]
+                k_shard = shards_weights[f"{name}_k"]
+                v_shard = shards_weights[f"{name}_v"]
+                param.q_data.copy_(q_shard)
+                param.k_data.copy_(k_shard)
+                param.v_data.copy_(v_shard)
+            else:
                 param.data.copy_(shards_weights[name])
+            # if name in shards_weights.keys():
+            #     param.data.copy_(shards_weights[name])
 
         self.model.decoder.embed_tokens.update_sharded_indices(shard_ids=self.shard_ids, total_num_shards=self.total_num_shards)
         # self.shard_ids.append(shard_id)
@@ -414,10 +429,19 @@ class OPTForCausalLM(nn.Module):
         shard_id = shard_ids[0]
         assert shard_id not in self.shard_ids, f"{shard_id} already in the model"
         for name, param in self.named_parameters():
-            if name in shards_weights.keys():
-                assert hasattr(param, "shard_ids")
+            if isinstance(param, QKVShardedParameter):
+                q_shard = shards_weights[f"{name}_q"]
+                k_shard = shards_weights[f"{name}_k"]
+                v_shard = shards_weights[f"{name}_v"]
+                param.append_shard(q_shard, k_shard, v_shard)
+                del shards_weights[f"{name}_q"], shards_weights[f"{name}_k"], shards_weights[f"{name}_v"]
+            elif isinstance(param, ShardedParameter):
                 param.append_shard(shard_id, shards_weights[name])
                 del shards_weights[name]
+            # if name in shards_weights.keys():
+            #     assert hasattr(param, "shard_ids")
+            #     param.append_shard(shard_id, shards_weights[name])
+            #     del shards_weights[name]
         
         for layer in self.model.decoder.layers:
             layer.self_attn.attn.append_shard(shard_id)

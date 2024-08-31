@@ -57,17 +57,18 @@ class ShardedParameter(Parameter):
 
         # Concatenate the views to form a new tensor
         new_data = torch.cat([before_shard, after_shard], dim=self.shard_dim)
+        del before_shard, after_shard
         return new_data
 
     def delete_shard(self, shard_id: int) -> None:
         if shard_id not in self.shard_ids:
             raise ValueError(f"shard_id: {shard_id} not in self.shard_ids: {self.shard_ids}")
         new_data = self._delete_shard(self.data, shard_id)
-        # self.data.detach()
         self.data = new_data
 
         index = self.shard_ids.index(shard_id)
         self.shard_ids.pop(index)
+        torch.cuda.empty_cache()
 
 
     def _is_appendable(self, shard_data: torch.Tensor) -> bool:
@@ -99,6 +100,7 @@ class ShardedParameter(Parameter):
         self.data = self._append_shard(self.data, shard_data)
 
         self.shard_ids.append(shard_id) 
+        torch.cuda.empty_cache()
 
 class QKVShardedParameter(ShardedParameter):
     def __init__(self, 
@@ -122,8 +124,8 @@ class QKVShardedParameter(ShardedParameter):
         k_shard = self._get_shard(self.k_data, shard_id)
         v_shard = self._get_shard(self.v_data, shard_id)
 
-        shard = torch.cat([q_shard, k_shard, v_shard], dim=self.shard_dim)
-        return shard
+        # shard = torch.cat([q_shard, k_shard, v_shard], dim=self.shard_dim)
+        return q_shard, k_shard, v_shard
 
     def delete_shard(self, shard_id: int) -> None:
         self.q_data = self._delete_shard(self.q_data, shard_id)
@@ -137,25 +139,28 @@ class QKVShardedParameter(ShardedParameter):
 
         index = self.shard_ids.index(shard_id)
         self.shard_ids.pop(index)
+        torch.cuda.empty_cache()
     
     
-    def append_shard(self, shard_id: int, shard_data: torch.Tensor) -> None:
+    def append_shard(self, shard_id: int, q_shard: torch.Tensor, k_shard: torch.Tensor, v_shard: torch.Tensor) -> None:
         if shard_id in self.shard_ids:
             raise ValueError(f"shard_id: {shard_id} is already in self.shard_ids")
 
-        if not self._is_appendable(shard_data):
-            raise ValueError(f"data with shape: {shard_data.shape} cannot be appended to tensor with shape: {self.shape}")
+        # if not self._is_appendable(shard_data):
+        #     raise ValueError(f"data with shape: {shard_data.shape} cannot be appended to tensor with shape: {self.shape}")
 
-        qkv_shard_size = shard_data.size(self.shard_dim) // 3
-        appended_q_data = shard_data.narrow(self.shard_dim, 0, qkv_shard_size)
-        appended_k_data = shard_data.narrow(self.shard_dim, qkv_shard_size, qkv_shard_size)
-        appended_v_data = shard_data.narrow(self.shard_dim, 2*qkv_shard_size, qkv_shard_size)
+        # qkv_shard_size = shard_data.size(self.shard_dim) // 3
+        # appended_q_data = shard_data.narrow(self.shard_dim, 0, qkv_shard_size)
+        # appended_k_data = shard_data.narrow(self.shard_dim, qkv_shard_size, qkv_shard_size)
+        # appended_v_data = shard_data.narrow(self.shard_dim, 2*qkv_shard_size, qkv_shard_size)
 
-        self.q_data = self._append_shard(self.q_data, appended_q_data)
-        self.k_data = self._append_shard(self.k_data, appended_k_data)
-        self.v_data = self._append_shard(self.v_data, appended_v_data)
+        self.q_data = self._append_shard(self.q_data, q_shard)
+        self.k_data = self._append_shard(self.k_data, k_shard)
+        self.v_data = self._append_shard(self.v_data, v_shard)
 
         self.data = torch.cat([self.q_data, self.k_data, self.v_data], dim=self.shard_dim)
+        del self.q_data, self.k_data, self.v_data
         self.q_data, self.k_data, self.v_data = self.data.chunk(3)
 
         self.shard_ids.append(shard_id) 
+        torch.cuda.empty_cache()

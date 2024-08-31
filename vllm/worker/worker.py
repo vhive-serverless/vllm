@@ -151,10 +151,15 @@ class Worker(WorkerBase):
             logger.info(f"send weights shards takes: {send_latency:.2f}s, sent out: {bytes_sent/(1024**3):.2f}GB, sent bw: {sent_bandwidth:.2f}GB/s")
         else:
             if not hasattr(self.model_runner, "model"):
+                start = time.time()
                 self.model_runner.initialize_sharded_model(shard_ids)
+                print(f"It takes: {time.time() - start:.2f}s to init model weights")
+                start = time.time()
                 shards_weights = self.model_runner.recv_shards(shard_ids, src, only_sharded=False)
+                print(f"It takes: {time.time() - start:.2f}s to recv shards")
                 start = time.time()
                 self.model_runner.model.load_shards_weights(shard_ids,shards_weights)
+                print(f"It takes {time.time() - start:.2f} to load shards")
             else:
                 shards_weights = self.model_runner.recv_shards(shard_ids, src, only_sharded=True)
                 self.model_runner.model.append_shards_weights(shard_ids, 
@@ -463,6 +468,20 @@ class Worker(WorkerBase):
                                                 self.model_config,
                                                 self.parallel_config,
                                                 )
+    def delete_kv_cache(self):
+        torch.cuda.empty_cache()
+        free_mem, _ = torch.cuda.mem_get_info()
+        logger.info(f"Before delete all kv_cache, we have {free_mem/(1024**3):.1f}GB space on GPU0")
+
+        last_free_mem = free_mem
+        for i in range(self.cache_engine.num_layers):
+            self.cache_engine.gpu_cache[i].delete_shard(1)
+            # self.cache_engine.gpu_cache[i].data = torch.empty(0)
+            torch.cuda.empty_cache()
+            free_mem, _ = torch.cuda.mem_get_info()
+            freed_mem = free_mem - last_free_mem
+            last_free_mem = free_mem
+            logger.info(f"After deleting kv_cache for layer {i}, we have {freed_mem/(1024**2):.1f}MB more space on GPU0")
 
 
 def init_worker_distributed_environment(
@@ -516,3 +535,4 @@ def raise_if_cache_size_invalid(num_gpu_blocks, block_size,
             f"stored in KV cache ({max_seq_len}). Try increasing "
             "`gpu_memory_utilization` or decreasing `max_model_len` when "
             "initializing the engine.")
+

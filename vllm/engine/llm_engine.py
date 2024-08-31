@@ -752,7 +752,9 @@ class LLMEngine:
             liquid_request = self.liquid_request_queue.get()
             try:
                 liquid_output = self._do_liquid(liquid_request)
-                logger.info(f"Finished liquid for {self.liquid_count} times, output: {liquid_output}")
+                torch.cuda.empty_cache()
+                free_mem, _ = torch.cuda.mem_get_info()
+                logger.info(f"Finished liquid for {self.liquid_count} times, output: {liquid_output}, current free mem on GPU0: {free_mem/(1024**3):.1f}GB")
                 self.liquid_count += 1
             except Exception as e:
                 logger.error(f"Failed to perform liquid! error: {e}")
@@ -809,6 +811,7 @@ class LLMEngine:
             >>>     if not (engine.has_unfinished_requests() or example_inputs):
             >>>         break
         """
+        # self.model_executor.delete_kv_cache()
         cache_usage = self.get_latest_metrics().gpu_cache_usage
         liquid_request = self.auto_scaler.step(cache_usage)
         if liquid_request is not None:
