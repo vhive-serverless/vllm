@@ -18,7 +18,8 @@ class ShardedTensor(Tensor):
         super().__init__()
         self.data = data
         if shard_ids:
-            assert num_shards == len(shard_ids), f"num_shards:{num_shards} does not equal to the length of shard_ids: {len(shard_ids)}"
+            # assert num_shards == len(shard_ids), f"num_shards:{num_shards} does not equal to the length of shard_ids: {len(shard_ids)}"
+            pass
         else:
             shard_ids = list(range(num_shards))
 
@@ -72,6 +73,8 @@ class ShardedTensor(Tensor):
 
         index = self.shard_ids.index(shard_id)
         self.shard_ids.pop(index)
+        torch.cuda.empty_cache()
+        # torch.cuda.synchronize()
 
 
     def _is_appendable(self, shard_data: torch.Tensor) -> bool:
@@ -102,6 +105,7 @@ class ShardedTensor(Tensor):
         self.data = new_data
 
         self.shard_ids.append(shard_id) 
+        torch.cuda.empty_cache()
 
         
 

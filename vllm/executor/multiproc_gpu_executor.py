@@ -162,7 +162,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             self.cache_config.num_gpu_blocks += num_new_gpu_blocks
             self.num_gpu_blocks_stack.append(self.cache_config.num_gpu_blocks)
 
-            logger.info(f"After scale out, num_gpu_blocks: {self.cache_config.num_gpu_blocks}")
+            logger.info(f"After scale out, num_gpu_blocks: #{self.cache_config.num_gpu_blocks}")
             start = time.time()
             self._run_workers("extend_gpu_blocks", self.cache_config.num_gpu_blocks)
             extend_gpu_latency = time.time() - start
@@ -243,6 +243,9 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
     def update_active_ranks(self,active_ranks: List[int]):
         self.stop_remote_worker_execution_loop()
         self._run_workers("update_active_ranks", active_ranks=active_ranks, only_active_workers=False)
+
+    def delete_kv_cache(self):
+        self._run_worker("delete_kv_cache", rank=0)
 
     def shutdown(self):
         if (worker_monitor := getattr(self, "worker_monitor",

@@ -29,7 +29,7 @@ class LiquidCommunicator:
         offset = 0
         for key, tensor in tensor_dict.items():
             shape = tensor.shape
-            length = tensor.flatten().numel()
+            length = tensor.numel()
             meta_data = MetaData(offset, length, shape)
             self.store.set(key, str(meta_data))
             self.meta_keys.append(key)
@@ -85,8 +85,8 @@ class LiquidCommunicator:
         num_bytes_sent = 0
         for key, tensor in tensor_dict.items():
             assert tensor.dtype == self.dtype
-            tensor = tensor.flatten()
-            length = tensor.numel()
+            tensor_flatten = tensor.reshape(-1)
+            length = tensor_flatten.numel()
 
 
             tensor_start = 0
@@ -95,7 +95,7 @@ class LiquidCommunicator:
                 tensor_end = min(tensor_start + available_space, length)
 
                 # Copy part of the tensor into the buffer
-                self.buffer[buffer_start:buffer_start + (tensor_end - tensor_start)] = tensor[tensor_start:tensor_end]
+                self.buffer[buffer_start:buffer_start + (tensor_end - tensor_start)].copy_(tensor_flatten[tensor_start:tensor_end])
                 buffer_start += tensor_end - tensor_start
                 tensor_start = tensor_end
 
@@ -103,6 +103,11 @@ class LiquidCommunicator:
                 if buffer_start == self.buffer_length:
                     num_bytes_sent += self._send(tensor=self.buffer, dst=dst_rank)
                     buffer_start = 0  # Reset buffer
+            # del tensor_flatten
+            # del tensor
+            # torch.cuda.empty_cache()
+            # free_mem, _ = torch.cuda.mem_get_info()
+            # print(f"free_mem after sending tensor: {key}: {free_mem/(1024**2):.2f}MB")
 
         # Send any remaining data in the buffer
         if buffer_start > 0:
