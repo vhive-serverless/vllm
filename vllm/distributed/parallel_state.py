@@ -98,11 +98,11 @@ class ActiveGroupManager:
             
 
     def destroy_model_parallel(self):
-        # if self._TP_DEVICE_GROUP is not None:
-        #     torch.distributed.destroy_process_group(self._TP_DEVICE_GROUP)
+        if self._TP_DEVICE_GROUP is not None:
+            torch.distributed.destroy_process_group(self._TP_DEVICE_GROUP)
         self._TP_DEVICE_GROUP = None
-        # if self._TP_CPU_GROUP is not None:
-        #     torch.distributed.destroy_process_group(self._TP_CPU_GROUP)
+        if self._TP_CPU_GROUP is not None:
+            torch.distributed.destroy_process_group(self._TP_CPU_GROUP)
         self._TP_CPU_GROUP = None
         self._TP_PYNCCL_COMMUNICATOR = None
         self._TP_CA_COMMUNICATOR = None

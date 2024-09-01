@@ -314,8 +314,15 @@ def broadcast_tensor_dict(
                                                      group=group,
                                                      async_op=True)
             async_handles.append(handle)
+        torch.cuda.synchronize()
         for async_handle in async_handles:
             async_handle.wait()
+        for tensor in  tensor_list:
+            del tensor
+        del tensor_list
+        torch.cuda.empty_cache()
+        free_mem, _ = torch.cuda.mem_get_info()
+        print(f"After broadcasting tensor list, free mem on GPU0: {free_mem/(1024**3):.2f}GB")
 
     else:
         recv_metadata_list = [None]

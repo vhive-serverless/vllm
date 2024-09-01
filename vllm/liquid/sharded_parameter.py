@@ -108,7 +108,7 @@ class QKVShardedParameter(ShardedParameter):
                  num_shards: int = 1,
                  shard_dim: int = 0,
                  shard_ids : Optional[List[int]] = None,
-                 requires_grad: bool = True,
+                 requires_grad: bool = False,
                  ):
         super().__init__(data, num_shards, shard_dim, shard_ids)
         self.requires_grad = requires_grad

@@ -166,7 +166,9 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             start = time.time()
             self._run_workers("extend_gpu_blocks", self.cache_config.num_gpu_blocks)
             extend_gpu_latency = time.time() - start
-            print(f"extending gpu blocks takes: {extend_gpu_latency:.2f}s")
+            torch.cuda.empty_cache()
+            free_mem, _ = torch.cuda.mem_get_info()
+            logger.info(f"extending gpu blocks takes: {extend_gpu_latency:.2f}s, there are {free_mem/(1024**3):.3f}GB left on GPU 0")
 
         elif liquid_type == LiquidType.LIQUID_2_1:
             src = 1
@@ -262,6 +264,9 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         Passing None will cause the driver to stop the model execution
         loop running in each of the remote workers.
         """
+        torch.cuda.empty_cache()
+        free_mem, _ = torch.cuda.mem_get_info()
+        logger.info(f"Before executing model on driver, free mem on GPU0: {free_mem/(1024**3):.2f}GB")
         return self.driver_worker.execute_model(
             execute_model_req=execute_model_req)
 

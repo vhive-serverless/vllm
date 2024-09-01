@@ -30,6 +30,7 @@ from vllm.liquid.utils import send_dict, receive_dict
 from vllm.model_executor.model_loader.utils import (get_model_architecture,
                                                     set_default_torch_dtype)
 import time
+from vllm.liquid.sharded_parameter import QKVShardedParameter, ShardedParameter
 
 logger = init_logger(__name__)
 
@@ -150,13 +151,7 @@ class ModelRunner:
         self.lora_manager: Optional[LRUCacheWorkerLoRAManager] = None
 
     def send_shards(self, shard_ids: List[int], dst: int, only_sharded: bool = False) -> int:
-        torch.cuda.empty_cache()
-        free_mem, _ = torch.cuda.mem_get_info()
-        logger.info(f"free mem when entering send_shards: {free_mem/(1024**3):.2f}GB")
         shards_weights:Dict[str, torch.Tensor] = self.model.get_shards_weights(shard_ids, only_sharded=only_sharded)
-        torch.cuda.empty_cache()
-        free_mem, _ = torch.cuda.mem_get_info()
-        logger.info(f"free mem after get_shards: {free_mem/(1024**3):.2f}GB")
         liquid_comm = get_liquid_communicator()
         start = time.time()
         bytes_sent = liquid_comm.send_dict(shards_weights, dst)
@@ -174,10 +169,21 @@ class ModelRunner:
 
     def recv_shards(self, shard_ids: List[int], src: int, only_sharded: bool = False):
         liquid_comm = get_liquid_communicator()
-        if only_sharded:
-            param_names = [name for name, _ in self.model.named_sharded_parameters()]
-        else:
-            param_names = [name for name, _ in self.model.named_parameters()]
+        param_names = []
+        for name, param in self.model.named_parameters():
+            if isinstance(param, QKVShardedParameter):
+                param_names.append(f"{name}_q")
+                param_names.append(f"{name}_k")
+                param_names.append(f"{name}_v")
+            elif isinstance(param, ShardedParameter):
+                param_names.append(name)
+            else:
+                if not only_sharded:
+                    param_names.append(name)
+        # if only_sharded:
+        #     param_names = [name for name, _ in self.model.named_sharded_parameters()]
+        # else:
+        #     param_names = [name for name, _ in self.model.named_parameters()]
         shards_weights = liquid_comm.recv_dict(src, param_names)
         return shards_weights
 
@@ -721,6 +727,9 @@ class ModelRunner:
         if self.is_driver_worker:
             assert seq_group_metadata_list is not None
             # Prepare input tensors.
+            torch.cuda.empty_cache()
+            free_mem, _ = torch.cuda.mem_get_info()
+            logger.info(f"Before create model input, free mem on GPU0: {free_mem/(1024**3):.2f}GB")
             (
                 input_tokens,
                 input_positions,
@@ -735,6 +744,9 @@ class ModelRunner:
                 num_decode_tokens,
                 num_prefills,
             ) = self._prepare_model_input(seq_group_metadata_list)
+            # torch.cuda.empty_cache()
+            # free_mem, _ = torch.cuda.mem_get_info()
+            # logger.info(f"After create model input, free mem on GPU0: {free_mem/(1024**3):.2f}GB")
             sampling_metadata = SamplingMetadata.prepare(
                 seq_group_metadata_list, seq_lens, query_lens, self.device,
                 self.pin_memory)
@@ -757,6 +769,9 @@ class ModelRunner:
             group = get_tensor_model_parallel_group()
             metadata_group = get_tensor_model_parallel_cpu_group()
             broadcast_tensor_dict(metadata_dict, src=0, group=group, metadata_group=metadata_group)
+            torch.cuda.empty_cache()
+            free_mem, _ = torch.cuda.mem_get_info()
+            logger.info(f"After broadcasting, free mem on GPU0: {free_mem/(1024**3):.2f}GB")
         else:
             group = get_tensor_model_parallel_group()
             metadata_group = get_tensor_model_parallel_cpu_group()
@@ -790,9 +805,15 @@ class ModelRunner:
         seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
         kv_caches: List[torch.Tensor],
     ) -> Optional[SamplerOutput]:
+        torch.cuda.empty_cache()
+        free_mem, _ = torch.cuda.mem_get_info()
+        logger.info(f"Before preparing inputs, free mem on GPU0: {free_mem/(1024**3):.2f}GB")
         (input_tokens, input_positions, attn_metadata, sampling_metadata,
          lora_requests, lora_mapping, multi_modal_kwargs
          ) = self.prepare_input_tensors(seq_group_metadata_list)
+        torch.cuda.empty_cache()
+        free_mem, _ = torch.cuda.mem_get_info()
+        logger.info(f"After preparing inputs, free mem on GPU0: {free_mem/(1024**3):.2f}GB")
 
         if self.lora_config:
             self.set_active_loras(lora_requests, lora_mapping)
