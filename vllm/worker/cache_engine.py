@@ -133,7 +133,7 @@ class CacheEngine:
         self.num_gpu_blocks = num_gpu_blocks
         torch.cuda.empty_cache()
         free_mem, _ = torch.cuda.mem_get_info()
-        print(f"available space after allocating GPU: {free_mem/(1024**2):.1f}MB")
+        print(f"available space after allocating GPU: {free_mem/(1024**3):.3f}GB")
 
     def move_gpu_blocks(self, src_to_dsts: List[Tuple[int,int]]):
         

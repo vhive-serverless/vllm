@@ -412,6 +412,7 @@ class OPTForCausalLM(nn.Module):
                 q_shard = shards_weights[f"{name}_q"]
                 k_shard = shards_weights[f"{name}_k"]
                 v_shard = shards_weights[f"{name}_v"]
+                # print(param.requires_grad)
                 param.q_data.copy_(q_shard)
                 param.k_data.copy_(k_shard)
                 param.v_data.copy_(v_shard)
@@ -433,7 +434,7 @@ class OPTForCausalLM(nn.Module):
                 q_shard = shards_weights[f"{name}_q"]
                 k_shard = shards_weights[f"{name}_k"]
                 v_shard = shards_weights[f"{name}_v"]
-                param.append_shard(q_shard, k_shard, v_shard)
+                param.append_shard(shard_id, q_shard, k_shard, v_shard)
                 del shards_weights[f"{name}_q"], shards_weights[f"{name}_k"], shards_weights[f"{name}_v"]
             elif isinstance(param, ShardedParameter):
                 param.append_shard(shard_id, shards_weights[name])

@@ -399,6 +399,9 @@ class Worker(WorkerBase):
         output = self.model_runner.execute_model(seq_group_metadata_list,
                                                  self.gpu_cache)
 
+        torch.cuda.empty_cache()
+        free_mem, _ = torch.cuda.mem_get_info()
+        logger.info(f"After model runner execute model, free mem on GPU0: {free_mem/(1024**3):.2f}GB")
         # Worker only supports single-step execution. Wrap the output in a list
         # to conform to interface.
         return [output]

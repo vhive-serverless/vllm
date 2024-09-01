@@ -754,7 +754,7 @@ class LLMEngine:
                 liquid_output = self._do_liquid(liquid_request)
                 torch.cuda.empty_cache()
                 free_mem, _ = torch.cuda.mem_get_info()
-                logger.info(f"Finished liquid for {self.liquid_count} times, output: {liquid_output}, current free mem on GPU0: {free_mem/(1024**3):.1f}GB")
+                logger.info(f"Finished liquid for {self.liquid_count} times, output: {liquid_output}, current free mem on GPU0: {free_mem/(1024**3):.2f}GB")
                 self.liquid_count += 1
             except Exception as e:
                 logger.error(f"Failed to perform liquid! error: {e}")
@@ -840,6 +840,10 @@ class LLMEngine:
                 execute_model_req=execute_model_req)
         else:
             output = []
+        
+        torch.cuda.empty_cache()
+        free_mem, _ = torch.cuda.mem_get_info()
+        logger.info(f"After executing model, free mem on GPU0: {free_mem/(1024**3):.2f}GB")
 
         request_outputs = self._process_model_outputs(
             output, scheduler_outputs.scheduled_seq_groups,
