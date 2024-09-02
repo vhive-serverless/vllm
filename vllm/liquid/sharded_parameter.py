@@ -185,6 +185,18 @@ class QKVShardedParameter(ShardedParameter):
         torch.cuda.empty_cache()
 
     def delete_shards(self, start_shard_id: int, end_shard_id: int):
+        q_data = self._delete_shards(self.q_data, start_shard_id, end_shard_id)
+        k_data = self._delete_shards(self.k_data, start_shard_id, end_shard_id)
+        v_data = self._delete_shards(self.v_data, start_shard_id, end_shard_id)
+        new_data = torch.cat([q_data, k_data, v_data], dim=self.shard_dim)
+        self.data = new_data
+        # del q_data, k_data, v_data
+        self.q_data, self.k_data, self.v_data = self.data.chunk(3, self.shard_dim)
+
+        for shard_id in range(start_shard_id, end_shard_id):
+            index = self.shard_ids.index(shard_id)
+            self.shard_ids.pop(index)
+        torch.cuda.empty_cache()
         
     
     
@@ -202,3 +214,17 @@ class QKVShardedParameter(ShardedParameter):
         self.q_data, self.k_data, self.v_data = self.data.chunk(3)
 
         self.shard_ids.append(shard_id) 
+
+    def append_shards(self, start_shard_id: int, end_shard_id: int,q_shard: torch.Tensor, k_shard: torch.Tensor, v_shard: torch.Tensor) -> None:
+
+
+        self.q_data = self._append_shard(self.q_data, q_shard)
+        self.k_data = self._append_shard(self.k_data, k_shard)
+        self.v_data = self._append_shard(self.v_data, v_shard)
+
+        self.data = torch.cat([self.q_data, self.k_data, self.v_data], dim=self.shard_dim)
+        del self.q_data, self.k_data, self.v_data
+        self.q_data, self.k_data, self.v_data = self.data.chunk(3)
+
+        for shard_id in range(start_shard_id, end_shard_id):
+            self.shard_ids.append(shard_id) 

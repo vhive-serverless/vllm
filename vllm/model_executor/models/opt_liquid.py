@@ -363,48 +363,59 @@ class OPTForCausalLM(nn.Module):
 
     def get_shards_weights(self, shard_ids: List[int], only_sharded: bool = True) -> Dict[str, torch.Tensor]:
         results = {}
-        if len(shard_ids) > 1:
-            raise NotImplementedError(f"get shards with length of {len(shard_ids)} is not implemented yet!")
+        if len(shard_ids) == 1:
+            start_shard_id = shard_ids[0]
+            end_shard_id = start_shard_id+1
+        else:
+            start_shard_id = shard_ids[0]
+            end_shard_id = shard_ids[-1]
 
-        shard_id = shard_ids[0]
-        assert shard_id in self.shard_ids, f"{shard_id} not in the model"
         for name, param in self.named_parameters():
             if isinstance(param, QKVShardedParameter):
-                q_shard, k_shard, v_shard = param.get_shard(shard_id)
+                q_shard, k_shard, v_shard = param.get_shards(start_shard_id, end_shard_id)
                 results[f"{name}_q"] = q_shard
                 results[f"{name}_k"] = k_shard
                 results[f"{name}_v"] = v_shard
             elif isinstance(param, ShardedParameter):
-                results[name] = param.get_shard(shard_id)
+                results[name] = param.get_shards(start_shard_id, end_shard_id)
             else:
                 if not only_sharded:
                     results[name] = param
         return results
 
     def delete_shards(self, shard_ids: List[int]) -> None:
-        if len(shard_ids) > 1:
-            raise NotImplementedError(f"delete shards with length of {len(shard_ids)} is not implemented yet!")
 
-        shard_id = shard_ids[0]
-        assert shard_id in self.shard_ids, f"{shard_id} not in the model"
+        if len(shard_ids) == 1:
+            start_shard_id = shard_ids[0]
+            end_shard_id = start_shard_id+1
+        else:
+            start_shard_id = shard_ids[0]
+            end_shard_id = shard_ids[-1]
+
         for name, param in self.named_parameters():
             if hasattr(param, "num_shards"):
-                param.delete_shard(shard_id)
+                param.delete_shards(start_shard_id, end_shard_id)
                 # torch.cuda.empty_cache()
         
 
         for layer in self.model.decoder.layers:
-            layer.self_attn.attn.delete_shard(shard_id)
+            for shard_id in range(start_shard_id, end_shard_id):
+                layer.self_attn.attn.delete_shard(shard_id)
 
         
-        index = self.shard_ids.index(shard_id)
-        self.shard_ids.pop(index)
+        for shard_id in range(start_shard_id, end_shard_id):
+            index = self.shard_ids.index(shard_id)
+            self.shard_ids.pop(index)
         self.model.decoder.embed_tokens.update_sharded_indices(shard_ids=self.shard_ids, total_num_shards=self.total_num_shards)
                 
 
     def load_shards_weights(self, shard_ids: List[int], shards_weights: Dict[str, torch.Tensor]):
-        if len(shard_ids) > 1:
-            raise NotImplementedError(f"load shards with length of {len(shard_ids)} is not implemented yet!")
+        if len(shard_ids) == 1:
+            start_shard_id = shard_ids[0]
+            end_shard_id = start_shard_id+1
+        else:
+            start_shard_id = shard_ids[0]
+            end_shard_id = shard_ids[-1]
         shard_id = shard_ids[0]
         assert shard_id in self.shard_ids, f"{shard_id} not in the model"
         for name, param in self.named_parameters():
@@ -425,25 +436,30 @@ class OPTForCausalLM(nn.Module):
         # self.shard_ids.append(shard_id)
 
     def append_shards_weights(self, shard_ids: List[int], shards_weights: Dict[str, torch.Tensor]):
-        if len(shard_ids) > 1:
-            raise NotImplementedError(f"load shards with length of {len(shard_ids)} is not implemented yet!")
-        shard_id = shard_ids[0]
-        assert shard_id not in self.shard_ids, f"{shard_id} already in the model"
+
+        if len(shard_ids) == 1:
+            start_shard_id = shard_ids[0]
+            end_shard_id = start_shard_id+1
+        else:
+            start_shard_id = shard_ids[0]
+            end_shard_id = shard_ids[-1]
         for name, param in self.named_parameters():
             if isinstance(param, QKVShardedParameter):
                 q_shard = shards_weights[f"{name}_q"]
                 k_shard = shards_weights[f"{name}_k"]
                 v_shard = shards_weights[f"{name}_v"]
-                param.append_shard(shard_id, q_shard, k_shard, v_shard)
+                param.append_shards(start_shard_id, end_shard_id ,q_shard, k_shard, v_shard)
                 del shards_weights[f"{name}_q"], shards_weights[f"{name}_k"], shards_weights[f"{name}_v"]
             elif isinstance(param, ShardedParameter):
-                param.append_shard(shard_id, shards_weights[name])
+                param.append_shard(start_shard_id, end_shard_id ,shards_weights[name])
                 del shards_weights[name]
         
         for layer in self.model.decoder.layers:
-            layer.self_attn.attn.append_shard(shard_id)
+            for shard_id in range(start_shard_id, end_shard_id):
+                layer.self_attn.attn.append_shard(shard_id)
 
-        self.shard_ids.append(shard_id)
+        for shard_id in range(start_shard_id, end_shard_id):
+            self.shard_ids.append(shard_id)
         self.model.decoder.embed_tokens.update_sharded_indices(shard_ids=self.shard_ids, total_num_shards=self.total_num_shards)
 
 
