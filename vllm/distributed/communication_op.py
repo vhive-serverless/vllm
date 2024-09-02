@@ -320,9 +320,6 @@ def broadcast_tensor_dict(
         for tensor in  tensor_list:
             del tensor
         del tensor_list
-        torch.cuda.empty_cache()
-        free_mem, _ = torch.cuda.mem_get_info()
-        print(f"After broadcasting tensor list, free mem on GPU0: {free_mem/(1024**3):.2f}GB")
 
     else:
         recv_metadata_list = [None]

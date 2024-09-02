@@ -162,12 +162,20 @@ class Worker(WorkerBase):
                 print(f"It takes {time.time() - start:.2f} to load shards")
             else:
                 shards_weights = self.model_runner.recv_shards(shard_ids, src, only_sharded=True)
+                torch.cuda.empty_cache()
+                free_mem, _ = torch.cuda.mem_get_info()
+                print(f"free mem after recving shards_weights: {free_mem/(1024**3):3f}GB")
                 self.model_runner.model.append_shards_weights(shard_ids, 
                     shards_weights = shards_weights)
+                torch.cuda.empty_cache()
+                free_mem, _ = torch.cuda.mem_get_info()
+                print(f"free mem after appending shards_weights: {free_mem/(1024**3):3f}GB")
             for name, weight in shards_weights.items():
                 del weight
             del shards_weights
             torch.cuda.empty_cache()
+            free_mem, _ = torch.cuda.mem_get_info()
+            print(f"free mem after deleting shards_weights: {free_mem/(1024**3):3f}GB")
 
     def init_cache(self, num_gpu_blocks: int, shard_ids):
         if not hasattr(self, "cache_engine"):
@@ -399,9 +407,6 @@ class Worker(WorkerBase):
         output = self.model_runner.execute_model(seq_group_metadata_list,
                                                  self.gpu_cache)
 
-        torch.cuda.empty_cache()
-        free_mem, _ = torch.cuda.mem_get_info()
-        logger.info(f"After model runner execute model, free mem on GPU0: {free_mem/(1024**3):.2f}GB")
         # Worker only supports single-step execution. Wrap the output in a list
         # to conform to interface.
         return [output]

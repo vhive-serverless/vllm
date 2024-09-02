@@ -203,8 +203,8 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
 
 
     def data_transmission(self, src: int, dst: int, shard_ids: List[int], is_scale_out) -> LiquidOutput:
-        free_memory, total_memory = torch.cuda.mem_get_info()
-        print(f"Before liquid, remaining space on GPU 0: {free_memory/(1024**3):.2f} GB")
+        allocated_memory = torch.cuda.memory_allocated()
+        print(f"Before liquid, allocated space on GPU 0: {allocated_memory/(1024**3):.2f} GB")
         liquid_output = LiquidOutput(shard_ids, src, dst)
         liquid_output.liquid_start = time.time()
         # check if the src is active
@@ -223,14 +223,13 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         only_send_sharded_weights = self.rank_worker_info_map[dst].initialized 
         torch.cuda.empty_cache()
         free_memory, total_memory = torch.cuda.mem_get_info()
-        logger.info(f"Before liquid model weights, remaining space on GPU 0: {free_memory/(1024**3):.2f} GB")
+        logger.info(f"Before liquid model weights, allocated space on GPU 0: {torch.cuda.memory_allocated()/(1024**3):.2f} GB")
         self._run_workers("liquid_model_weights", shard_ids=shard_ids, src=src, dst=dst, only_send_sharded_weights=only_send_sharded_weights, worker_ranks=[src, dst])
         liquid_output.finished_liquid_model_weights = time.time()
 
-        torch.cuda.synchronize()
         torch.cuda.empty_cache()
         free_memory, total_memory = torch.cuda.mem_get_info()
-        logger.info(f"After liquid model weights, remaining space on GPU 0: {free_memory/(1024**3):.2f} GB")
+        logger.info(f"After liquid model weights, allocated space on GPU 0: {torch.cuda.memory_allocated()/(1024**3):.2f} GB")
         liquid_output.finished_init_mem = time.time()
 
         # if dst has not initialize, then kv cache should be loaded, otherwise it should be appended
@@ -269,9 +268,6 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         Passing None will cause the driver to stop the model execution
         loop running in each of the remote workers.
         """
-        torch.cuda.empty_cache()
-        free_mem, _ = torch.cuda.mem_get_info()
-        logger.info(f"Before executing model on driver, free mem on GPU0: {free_mem/(1024**3):.2f}GB")
         return self.driver_worker.execute_model(
             execute_model_req=execute_model_req)
 
