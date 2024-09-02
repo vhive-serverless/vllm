@@ -439,10 +439,6 @@ class OPTForCausalLM(nn.Module):
             elif isinstance(param, ShardedParameter):
                 param.append_shard(shard_id, shards_weights[name])
                 del shards_weights[name]
-            # if name in shards_weights.keys():
-            #     assert hasattr(param, "shard_ids")
-            #     param.append_shard(shard_id, shards_weights[name])
-            #     del shards_weights[name]
         
         for layer in self.model.decoder.layers:
             layer.self_attn.attn.append_shard(shard_id)

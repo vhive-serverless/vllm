@@ -727,9 +727,6 @@ class ModelRunner:
         if self.is_driver_worker:
             assert seq_group_metadata_list is not None
             # Prepare input tensors.
-            torch.cuda.empty_cache()
-            free_mem, _ = torch.cuda.mem_get_info()
-            logger.info(f"Before create model input, free mem on GPU0: {free_mem/(1024**3):.2f}GB")
             (
                 input_tokens,
                 input_positions,
@@ -769,9 +766,6 @@ class ModelRunner:
             group = get_tensor_model_parallel_group()
             metadata_group = get_tensor_model_parallel_cpu_group()
             broadcast_tensor_dict(metadata_dict, src=0, group=group, metadata_group=metadata_group)
-            torch.cuda.empty_cache()
-            free_mem, _ = torch.cuda.mem_get_info()
-            logger.info(f"After broadcasting, free mem on GPU0: {free_mem/(1024**3):.2f}GB")
         else:
             group = get_tensor_model_parallel_group()
             metadata_group = get_tensor_model_parallel_cpu_group()
@@ -805,15 +799,9 @@ class ModelRunner:
         seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
         kv_caches: List[torch.Tensor],
     ) -> Optional[SamplerOutput]:
-        torch.cuda.empty_cache()
-        free_mem, _ = torch.cuda.mem_get_info()
-        logger.info(f"Before preparing inputs, free mem on GPU0: {free_mem/(1024**3):.2f}GB")
         (input_tokens, input_positions, attn_metadata, sampling_metadata,
          lora_requests, lora_mapping, multi_modal_kwargs
          ) = self.prepare_input_tensors(seq_group_metadata_list)
-        torch.cuda.empty_cache()
-        free_mem, _ = torch.cuda.mem_get_info()
-        logger.info(f"After preparing inputs, free mem on GPU0: {free_mem/(1024**3):.2f}GB")
 
         if self.lora_config:
             self.set_active_loras(lora_requests, lora_mapping)

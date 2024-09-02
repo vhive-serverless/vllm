@@ -841,9 +841,6 @@ class LLMEngine:
         else:
             output = []
         
-        torch.cuda.empty_cache()
-        free_mem, _ = torch.cuda.mem_get_info()
-        logger.info(f"After executing model, free mem on GPU0: {free_mem/(1024**3):.2f}GB")
 
         request_outputs = self._process_model_outputs(
             output, scheduler_outputs.scheduled_seq_groups,

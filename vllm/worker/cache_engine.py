@@ -103,23 +103,15 @@ class CacheEngine:
         kv_cache_shape = self.attn_backend.get_kv_cache_shape(num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size)
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
-        free_mem, _ = torch.cuda.mem_get_info()
-        print(f"available space before allocating GPU: {free_mem/(1024**2):.1f}MB")
-        last_free_mem = free_mem
+        init_free_mem, _ = torch.cuda.mem_get_info()
+        print(f"available space before extending GPU blocks: {init_free_mem/(1024**3):.3f}GB")
+        last_free_mem = init_free_mem
         for i in range(self.num_layers):
-            start = time.time()
             new_cache = torch.empty(kv_cache_shape, dtype=self.dtype, pin_memory=False, device="cuda")
             # torch.cuda.synchronize()
             original_num_blocks = self.gpu_cache[i].size(1)
             new_cache[:,:original_num_blocks, ...].copy_(self.gpu_cache[i])
-            # shard_ids = self.gpu_cache[i].shard_ids
-            # shard_dim = self.gpu_cache[i].shard_dim
-            # num_shards = self.gpu_cache[i].total_num_shards
-            # print(f"original tensor's shape: {self.gpu_cache[i].data.shape}")
             self.gpu_cache[i].data = new_cache
-            # self.gpu_cache[i].data = torch.empty(0)
-            # del self.gpu_cache[i]
-            # self.gpu_cache[i] = ShardedTensor(data=new_cache, shard_ids = shard_ids, num_shards=num_shards, shard_dim=shard_dim)
             # torch.cuda.synchronize()
             # torch.cuda.empty_cache()
             # gc.collect()
@@ -130,10 +122,11 @@ class CacheEngine:
             decreased_free_mem = last_free_mem - free_mem 
             last_free_mem = free_mem
             # print(f"After extending layer {i}, free mem decreased is: {decreased_free_mem/(1024**2):.3f} MB!")
+
         self.num_gpu_blocks = num_gpu_blocks
         torch.cuda.empty_cache()
         free_mem, _ = torch.cuda.mem_get_info()
-        print(f"available space after allocating GPU: {free_mem/(1024**3):.3f}GB")
+        print(f"available space after extending GPU blocks: {free_mem/(1024**3):.3f}GB, free_mem decreased: {(init_free_mem - free_mem)/(1024**3):.3f}GB")
 
     def move_gpu_blocks(self, src_to_dsts: List[Tuple[int,int]]):
         
@@ -252,7 +245,7 @@ class CacheEngine:
             data = shards_data.pop(f"layer_{i}")
             cache.append_shard(shard_id, data)
             del data
-            torch.cuda.empty_cache()
+            # torch.cuda.empty_cache()
 
         self.shard_ids.append(shard_id)
         total_num_shards = self.total_num_shards
