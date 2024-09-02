@@ -194,6 +194,11 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             liquid_output = self.data_transmission(src, dst, moved_shard_ids, is_scale_out=False)
             liquid_output.src_to_dsts = src_to_dsts
 
+        elif liquid_type == LiquidType.LIQUID_2_1:
+            src = 1
+            dst = 0
+            
+
         return liquid_output
 
 
