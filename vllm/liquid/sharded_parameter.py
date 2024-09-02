@@ -100,7 +100,6 @@ class ShardedParameter(Parameter):
         self.data = self._append_shard(self.data, shard_data)
 
         self.shard_ids.append(shard_id) 
-        # torch.cuda.empty_cache()
 
 class QKVShardedParameter(ShardedParameter):
     def __init__(self, 
@@ -128,38 +127,23 @@ class QKVShardedParameter(ShardedParameter):
         return q_shard, k_shard, v_shard
 
     def delete_shard(self, shard_id: int) -> None:
-        # q_data = self._delete_shard(self.q_data, shard_id)
-        # k_data = self._delete_shard(self.k_data, shard_id)
-        # v_data = self._delete_shard(self.v_data, shard_id)
+        q_data = self._delete_shard(self.q_data, shard_id)
+        k_data = self._delete_shard(self.k_data, shard_id)
+        v_data = self._delete_shard(self.v_data, shard_id)
 
-        # new_data = torch.cat([q_data, k_data, v_data], dim=self.shard_dim)
-        shape = list(self.data.shape)
-        dtype = self.data.dtype
-        device = self.data.device
-        shard_dim_size = shape[self.shard_dim]
-        shape[self.shard_dim] = (shard_dim_size * (len(self.shard_ids) - 1)) // len(self.shard_ids)
-        new_data = torch.empty(size=shape, dtype=dtype, device=device)
-        # TODO: perform the memory copy from original data to new data
+        new_data = torch.cat([q_data, k_data, v_data], dim=self.shard_dim)
         self.data = new_data
         # del q_data, k_data, v_data
         self.q_data, self.k_data, self.v_data = self.data.chunk(3, self.shard_dim)
 
         index = self.shard_ids.index(shard_id)
         self.shard_ids.pop(index)
-        torch.cuda.empty_cache()
     
     
     def append_shard(self, shard_id: int, q_shard: torch.Tensor, k_shard: torch.Tensor, v_shard: torch.Tensor) -> None:
         if shard_id in self.shard_ids:
             raise ValueError(f"shard_id: {shard_id} is already in self.shard_ids")
 
-        # if not self._is_appendable(shard_data):
-        #     raise ValueError(f"data with shape: {shard_data.shape} cannot be appended to tensor with shape: {self.shape}")
-
-        # qkv_shard_size = shard_data.size(self.shard_dim) // 3
-        # appended_q_data = shard_data.narrow(self.shard_dim, 0, qkv_shard_size)
-        # appended_k_data = shard_data.narrow(self.shard_dim, qkv_shard_size, qkv_shard_size)
-        # appended_v_data = shard_data.narrow(self.shard_dim, 2*qkv_shard_size, qkv_shard_size)
 
         self.q_data = self._append_shard(self.q_data, q_shard)
         self.k_data = self._append_shard(self.k_data, k_shard)
@@ -170,4 +154,3 @@ class QKVShardedParameter(ShardedParameter):
         self.q_data, self.k_data, self.v_data = self.data.chunk(3)
 
         self.shard_ids.append(shard_id) 
-        # torch.cuda.empty_cache()
