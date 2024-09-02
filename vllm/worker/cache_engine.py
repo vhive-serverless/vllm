@@ -120,9 +120,9 @@ class CacheEngine:
             # self.gpu_cache[i].data = torch.empty(0)
             # del self.gpu_cache[i]
             # self.gpu_cache[i] = ShardedTensor(data=new_cache, shard_ids = shard_ids, num_shards=num_shards, shard_dim=shard_dim)
-            torch.cuda.synchronize()
-            torch.cuda.empty_cache()
-            gc.collect()
+            # torch.cuda.synchronize()
+            # torch.cuda.empty_cache()
+            # gc.collect()
             
 
             # torch.cuda.synchronize()

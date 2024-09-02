@@ -68,7 +68,7 @@ class ShardedParameter(Parameter):
 
         index = self.shard_ids.index(shard_id)
         self.shard_ids.pop(index)
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
 
 
     def _is_appendable(self, shard_data: torch.Tensor) -> bool:
@@ -100,7 +100,7 @@ class ShardedParameter(Parameter):
         self.data = self._append_shard(self.data, shard_data)
 
         self.shard_ids.append(shard_id) 
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
 
 class QKVShardedParameter(ShardedParameter):
     def __init__(self, 
@@ -139,7 +139,7 @@ class QKVShardedParameter(ShardedParameter):
 
         index = self.shard_ids.index(shard_id)
         self.shard_ids.pop(index)
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
     
     
     def append_shard(self, shard_id: int, q_shard: torch.Tensor, k_shard: torch.Tensor, v_shard: torch.Tensor) -> None:
@@ -163,4 +163,4 @@ class QKVShardedParameter(ShardedParameter):
         self.q_data, self.k_data, self.v_data = self.data.chunk(3)
 
         self.shard_ids.append(shard_id) 
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
