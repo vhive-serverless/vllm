@@ -44,12 +44,24 @@ class ShardedTensor(Tensor):
         shard = tensor.narrow(self.shard_dim, start_index, self.shard_size)
         return shard
 
+    
+    def _get_shards(self, tensor: torch.Tensor, start_shard_id: int, end_shard_id: int) -> torch.Tensor:
+        index = self.shard_ids.index(start_shard_id)
+        start_index = index*self.shard_size
+
+        shards = tensor.narrow(self.shard_dim, start_index, self.shard_size*(end_shard_id - start_shard_id))
+        return shards
+
     def get_shard(self, shard_id: int) -> Tensor:
         if shard_id not in self.shard_ids:
             raise ValueError(f"shard_id: {shard_id} not in self.shard_ids")
 
         shard = self._get_shard(self.data, shard_id)
         return shard
+
+    def get_shards(self, start_shard_id: int, end_shard_id: int) -> torch.Tensor:
+        shards = self._get_shards(self.data, start_shard_id, end_shard_id)
+        return shards
 
     def _delete_shard(self, tensor: torch.Tensor, shard_id: int) -> torch.Tensor:
 
@@ -65,6 +77,15 @@ class ShardedTensor(Tensor):
         new_data = torch.cat([before_shard, after_shard], dim=self.shard_dim)
         return new_data
 
+    def _delete_shards(self, tensor: torch.Tensor, start_shard_id: int, end_shard_id: int) -> torch.Tensor:
+        index = self.shard_ids.index(start_shard_id)
+
+        start_index = index * self.shard_size
+        before_shard = tensor.narrow(self.shard_dim, 0, start_index)
+        after_shard = tensor.narrow(self.shard_dim, start_index + self.shard_size*(end_shard_id - start_shard_id), tensor.size(self.shard_dim) - start_index - self.shard_size*(end_shard_id - start_shard_id))
+        new_data = torch.cat([before_shard, after_shard], dim=self.shard_dim)
+        return new_data
+
     def delete_shard(self, shard_id: int) -> None:
         if shard_id not in self.shard_ids:
             raise ValueError(f"shard_id: {shard_id} not in self.shard_ids")
@@ -75,6 +96,14 @@ class ShardedTensor(Tensor):
         self.shard_ids.pop(index)
         torch.cuda.empty_cache()
         # torch.cuda.synchronize()
+
+    def delete_shards(self, tensor: torch.Tensor, start_shard_id: int, end_shard_id: int) -> torch.Tensor:
+        new_data = self._delete_shards(self.data, start_shard_id, end_shard_id)
+        self.data = new_data
+
+        for shard_id in range(start_shard_id, end_shard_id):
+            index = self.shard_ids.index(shard_id)
+            self.shard_ids.pop(index)
 
 
     def _is_appendable(self, shard_data: torch.Tensor) -> bool:
@@ -106,3 +135,8 @@ class ShardedTensor(Tensor):
 
         self.shard_ids.append(shard_id) 
         # torch.cuda.empty_cache()
+
+    def append_shards(self, start_shard_id:int, end_shard_id: int, shard_data: torch.Tensor) -> None:
+        self.data = self._append_shard(self.data, shard_data)
+        for shard_id in range(start_shard_id, end_shard_id):
+            self.shard_ids.append(shard_id)
