@@ -129,7 +129,7 @@ class CacheEngine:
         print(f"available space after extending GPU blocks: {free_mem/(1024**3):.3f}GB, free_mem decreased: {(init_free_mem - free_mem)/(1024**3):.3f}GB")
 
     def move_gpu_blocks(self, src_to_dsts: List[Tuple[int,int]]):
-        
+        if src_to_dsts == []: return 
         blocks_to_copy = torch.tensor(src_to_dsts,
                                       device="cuda",
                                       dtype=torch.int64).view(-1, 2)
@@ -177,25 +177,32 @@ class CacheEngine:
         
 
     def get_shards(self, shard_ids: List[int]) -> Dict[str,torch.Tensor]:
-        if len(shard_ids) > 1:
-            raise NotImplementedError(f"get shard with length > 1 is not implemented yet")
-        shard_id = shard_ids[0]
+        if len(shard_ids) == 1:
+            start_shard_id = shard_ids[0]
+            end_shard_id = start_shard_id+1
+        else:
+            start_shard_id = shard_ids[0]
+            end_shard_id = shard_ids[-1]+1
         results = {}
         for i, cache in enumerate(self.gpu_cache):
-            results[f"layer_{i}"] = cache.get_shard(shard_id)
+            results[f"layer_{i}"] = cache.get_shards(start_shard_id, end_shard_id)
 
         return results
 
     def delete_shards(self, shard_ids: List[int]) -> None:
-        if len(shard_ids) > 1:
-            raise NotImplementedError(f"delete shard with length > 1 is not implemented yet")
+        if len(shard_ids) == 1:
+            start_shard_id = shard_ids[0]
+            end_shard_id = start_shard_id+1
+        else:
+            start_shard_id = shard_ids[0]
+            end_shard_id = shard_ids[-1]+1
         shard_id = shard_ids[0]
         torch.cuda.empty_cache()
         free_mem,_ = torch.cuda.mem_get_info()
         latest_free_mem = free_mem
         logger.info(f"After deleting layer's shard, free mem: {free_mem/(1024**2):.2f}MB")
         for i, cache in enumerate(self.gpu_cache):
-            cache.delete_shard(shard_id) 
+            cache.delete_shards(start_shard_id, end_shard_id) 
             # torch.cuda.empty_cache()
             # free_mem,_ = torch.cuda.mem_get_info()
             # logger.info(f"After deleting layer's shard, free mem increased by: {(free_mem - latest_free_mem)/(1024**2):.2f}MB")
@@ -214,19 +221,22 @@ class CacheEngine:
         # TODO: handle cpu cache
         # for cache in self.cpu_cache:
         #     cache.delete_shard(shard_id)
-
-        index = self.shard_ids.index(shard_id)
-        self.shard_ids.pop(index)
+        for shard_id in range(start_shard_id, end_shard_id):
+            index = self.shard_ids.index(shard_id)
+            self.shard_ids.pop(index)
 
         total_num_shards = self.total_num_shards
         current_num_shards = len(self.shard_ids)
         self.num_kv_heads = (self.total_num_kv_heads // total_num_shards) * current_num_shards
 
     def load_shards(self,shard_ids: List[int], shards_data: Dict[str, torch.Tensor]):
-        if len(shard_ids) > 1:
-            raise NotImplementedError(f"get shard with length > 1 is not implemented yet")
-        shard_id = shard_ids[0]
-        assert shard_id in self.shard_ids
+        if len(shard_ids) == 1:
+            start_shard_id = shard_ids[0]
+            end_shard_id = start_shard_id+1
+        else:
+            start_shard_id = shard_ids[0]
+            end_shard_id = shard_ids[-1]+1
+
         for i, cache in enumerate(self.gpu_cache):
             data = shards_data.pop(f"layer_{i}")
             cache.copy_(data)
@@ -237,17 +247,20 @@ class CacheEngine:
         self.num_kv_heads = (self.total_num_kv_heads // total_num_shards) * current_num_shards
 
     def append_shards(self,shard_ids: List[int], shards_data: Dict[str, torch.Tensor]):
-        if len(shard_ids) > 1:
-            raise NotImplementedError(f"get shard with length > 1 is not implemented yet")
-        shard_id = shard_ids[0]
-        assert shard_id not in self.shard_ids, f"shard {shard_id} already in cache tensors: {self.shard_ids}"
+        if len(shard_ids) == 1:
+            start_shard_id = shard_ids[0]
+            end_shard_id = start_shard_id+1
+        else:
+            start_shard_id = shard_ids[0]
+            end_shard_id = shard_ids[-1]+1
         for i, cache in enumerate(self.gpu_cache):
             data = shards_data.pop(f"layer_{i}")
-            cache.append_shard(shard_id, data)
+            cache.append_shards(start_shard_id, end_shard_id, data)
             del data
             # torch.cuda.empty_cache()
 
-        self.shard_ids.append(shard_id)
+        for shard_id in range(start_shard_id, end_shard_id):
+            self.shard_ids.append(shard_id)
         total_num_shards = self.total_num_shards
         current_num_shards = len(self.shard_ids)
         self.num_kv_heads = (self.total_num_kv_heads // total_num_shards) * current_num_shards

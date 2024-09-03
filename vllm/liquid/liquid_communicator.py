@@ -137,7 +137,16 @@ class LiquidCommunicator:
         tensor_dict = {}
 
         for key, meta_data in meta_data_dict.items():
-            tensor_dict[key] = torch.empty(meta_data.length, dtype=self.dtype, device='cuda')
+            try:
+                tensor_dict[key] = torch.empty(meta_data.length, dtype=self.dtype, device='cuda')
+            except:
+                torch.cuda.empty_cache()
+                free_mem, _ = torch.cuda.mem_get_info()
+                print(f"After empty cache, allocated space on GPU 0: {torch.cuda.memory_allocated()/(1024**3):.2f} GB, reserved space on GPU 0: {torch.cuda.memory_reserved()/(1024**3):.2f} GB, free space: {free_mem/(1024**3):.2f}GB")
+                tensor_dict[key] = torch.empty(meta_data.length, dtype=self.dtype, device='cuda')
+
+            # free_mem, _ = torch.cuda.mem_get_info() 
+            # print(f"After recving {key}, allocated space on GPU 0: {torch.cuda.memory_allocated()/(1024**3):.2f} GB, reserved space on GPU 0: {torch.cuda.memory_reserved()/(1024**3):.2f} GB, free space: {free_mem/(1024**3):.2f}GB")
 
 
         num_bytes_recv = 0
