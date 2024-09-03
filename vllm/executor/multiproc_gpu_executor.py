@@ -164,7 +164,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
 
             logger.info(f"After scale out, num_gpu_blocks: #{self.cache_config.num_gpu_blocks}")
             start = time.time()
-            self._run_workers("extend_gpu_blocks", self.cache_config.num_gpu_blocks)
+            self._run_workers("extend_gpu_blocks", self.cache_config.num_gpu_blocks, worker_ranks=[src, dst])
             extend_gpu_latency = time.time() - start
             torch.cuda.empty_cache()
             free_mem, _ = torch.cuda.mem_get_info()
@@ -223,13 +223,14 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         only_send_sharded_weights = self.rank_worker_info_map[dst].initialized 
         torch.cuda.empty_cache()
         free_memory, total_memory = torch.cuda.mem_get_info()
-        logger.info(f"Before liquid model weights, allocated space on GPU 0: {torch.cuda.memory_allocated()/(1024**3):.2f} GB")
+        free_mem, _ = torch.cuda.mem_get_info()
+        logger.info(f"Before liquid model weights, allocated space on GPU 0: {torch.cuda.memory_allocated()/(1024**3):.2f} GB, reserved space on GPU 0: {torch.cuda.memory_reserved()/(1024**3):.2f} GB, free space: {free_mem/(1024**3):.2f}GB")
         self._run_workers("liquid_model_weights", shard_ids=shard_ids, src=src, dst=dst, only_send_sharded_weights=only_send_sharded_weights, worker_ranks=[src, dst])
         liquid_output.finished_liquid_model_weights = time.time()
 
         torch.cuda.empty_cache()
-        free_memory, total_memory = torch.cuda.mem_get_info()
-        logger.info(f"After liquid model weights, allocated space on GPU 0: {torch.cuda.memory_allocated()/(1024**3):.2f} GB")
+        free_mem, _ = torch.cuda.mem_get_info()
+        logger.info(f"After liquid model weights, allocated space on GPU 0: {torch.cuda.memory_allocated()/(1024**3):.2f} GB, reserved space on GPU 0: {torch.cuda.memory_reserved()/(1024**3):.2f} GB, free space: {free_mem/(1024**3):.2f}GB")
         liquid_output.finished_init_mem = time.time()
 
         # if dst has not initialize, then kv cache should be loaded, otherwise it should be appended
@@ -356,6 +357,14 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         for result in parallel_worker_tasks:
             result.get()
 
+    def get_shards_weights(self, shard_ids: List[int]):
+        return self._run_worker("get_shards_weights", shard_ids=shard_ids, rank=0)
+
+    def delete_shards_weights(self, shard_ids: List[int]):
+        self._run_worker("delete_shards_weights", shard_ids=shard_ids, rank=0)
+
+    def append_shards_weights(self, shard_ids: List[int], shards_weights):
+        self._run_worker("append_shards_weights", shard_ids=shard_ids, shards_weights=shards_weights, rank=0)
 
 class MultiprocessingGPUExecutorAsync(MultiprocessingGPUExecutor,
                                       DistributedGPUExecutorAsync):

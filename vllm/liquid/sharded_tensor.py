@@ -97,7 +97,7 @@ class ShardedTensor(Tensor):
         torch.cuda.empty_cache()
         # torch.cuda.synchronize()
 
-    def delete_shards(self, tensor: torch.Tensor, start_shard_id: int, end_shard_id: int) -> torch.Tensor:
+    def delete_shards(self, start_shard_id: int, end_shard_id: int) -> torch.Tensor:
         new_data = self._delete_shards(self.data, start_shard_id, end_shard_id)
         self.data = new_data
 

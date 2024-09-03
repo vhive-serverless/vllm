@@ -161,13 +161,18 @@ class Worker(WorkerBase):
                 self.model_runner.model.load_shards_weights(shard_ids,shards_weights)
                 print(f"It takes {time.time() - start:.2f} to load shards")
             else:
+                free_mem, _ = torch.cuda.mem_get_info()
+                logger.info(f"Before recving weights shards, allocated space on GPU 0: {torch.cuda.memory_allocated()/(1024**3):.2f} GB, reserved space on GPU 0: {torch.cuda.memory_reserved()/(1024**3):.2f} GB, free space: {free_mem/(1024**3):.2f}GB")
                 shards_weights = self.model_runner.recv_shards(shard_ids, src, only_sharded=True)
                 torch.cuda.empty_cache()
+                logger.info(f"After recving weights shards, allocated space on GPU 0: {torch.cuda.memory_allocated()/(1024**3):.2f} GB, reserved space on GPU 0: {torch.cuda.memory_reserved()/(1024**3):.2f} GB, free space: {free_mem/(1024**3):.2f}GB")
                 free_mem, _ = torch.cuda.mem_get_info()
                 print(f"free mem after recving shards_weights: {free_mem/(1024**3):3f}GB")
                 self.model_runner.model.append_shards_weights(shard_ids, 
                     shards_weights = shards_weights)
                 torch.cuda.empty_cache()
+                free_mem, _ = torch.cuda.mem_get_info()
+                logger.info(f"After appending weights shards, allocated space on GPU 0: {torch.cuda.memory_allocated()/(1024**3):.2f} GB, reserved space on GPU 0: {torch.cuda.memory_reserved()/(1024**3):.2f} GB, free space: {free_mem/(1024**3):.2f}GB")
                 free_mem, _ = torch.cuda.mem_get_info()
                 print(f"free mem after appending shards_weights: {free_mem/(1024**3):3f}GB")
             for name, weight in shards_weights.items():
@@ -490,6 +495,15 @@ class Worker(WorkerBase):
             freed_mem = free_mem - last_free_mem
             last_free_mem = free_mem
             logger.info(f"After deleting kv_cache for layer {i}, we have {freed_mem/(1024**2):.1f}MB more space on GPU0")
+
+    def get_shards_weights(self, shard_ids: List[int]):
+        return self.model_runner.model.get_shards_weights(shard_ids)
+
+    def delete_shards_weights(self, shard_ids: List[int]):
+        self.model_runner.model.delete_shards(shard_ids)
+
+    def append_shards_weights(self, shard_ids: List[int], shards_weights):
+        self.model_runner.model.append_shards_weights(shard_ids, shards_weights)
 
 
 def init_worker_distributed_environment(

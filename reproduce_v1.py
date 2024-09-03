@@ -1,7 +1,9 @@
+
 from vllm import LLM, SamplingParams
 from vllm.liquid.request import LiquidRequest, LiquidType
 # from vllm import EngineArgs, LLMEngine
 import asyncio
+import torch
 
 import os
 
@@ -21,32 +23,21 @@ def main():
         liquid_total_num_shards = 4,
         # gpu_memory_utilization=0.7,
     )
+
+
+    torch.cuda.empty_cache()
+    free_mem, _ = torch.cuda.mem_get_info()
+    print(f"After initializing model, allocated space on GPU 0: {torch.cuda.memory_allocated()/(1024**3):.2f} GB, reserved space on GPU 0: {torch.cuda.memory_reserved()/(1024**3):.2f} GB, free space: {free_mem/(1024**3):.2f}GB")
+
     for i in range(1):
         liquid_request = LiquidRequest(LiquidType.LIQUID_1_2)
         llm.do_liquid(liquid_request)
-        # liquid_request = LiquidRequest(LiquidType.LIQUID_2_4)
-        # llm.do_liquid(liquid_request)
-        # liquid_request = LiquidRequest(LiquidType.LIQUID_4_2)
-        # llm.do_liquid(liquid_request)
         liquid_request = LiquidRequest(LiquidType.LIQUID_2_1)
         llm.do_liquid(liquid_request)
-    # liquid_request = LiquidRequest(LiquidType.LIQUID_1_2)
-    # llm.do_liquid(liquid_request)
-    # llm.do_liquid(shard_ids, dst, src, False)
-    # llm.do_liquid(shard_ids, src, dst)
-    # llm.do_liquid(shard_ids, dst, src)
 
-    sampling_params = SamplingParams(temperature=0, min_tokens=127, max_tokens=128)
-    request_num = 1
-    word = "what is LLM?" 
-    prompt = word * 200
-    inputs = [prompt for _ in range(request_num)]
-    for request_id in range(request_num):
-        output = llm.generate(inputs, sampling_params=sampling_params)
-        print(f"output: {output[0].outputs[0].text}")
-
-
-        
+    
+    llm.llm_engine.check_liquid_request_and_complete()
+    llm.llm_engine.check_liquid_request_and_complete()
 
 if __name__ == '__main__':
     main()
