@@ -21,20 +21,15 @@ def main():
         liquid_total_num_shards = 4,
         # gpu_memory_utilization=0.7,
     )
-    for i in range(100):
+    for i in range(1):
         liquid_request = LiquidRequest(LiquidType.LIQUID_1_2)
         llm.do_liquid(liquid_request)
-        # liquid_request = LiquidRequest(LiquidType.LIQUID_2_4)
-        # llm.do_liquid(liquid_request)
-        # liquid_request = LiquidRequest(LiquidType.LIQUID_4_2)
-        # llm.do_liquid(liquid_request)
+        liquid_request = LiquidRequest(LiquidType.LIQUID_2_4)
+        llm.do_liquid(liquid_request)
+        liquid_request = LiquidRequest(LiquidType.LIQUID_4_2)
+        llm.do_liquid(liquid_request)
         liquid_request = LiquidRequest(LiquidType.LIQUID_2_1)
         llm.do_liquid(liquid_request)
-    # liquid_request = LiquidRequest(LiquidType.LIQUID_1_2)
-    # llm.do_liquid(liquid_request)
-    # llm.do_liquid(shard_ids, dst, src, False)
-    # llm.do_liquid(shard_ids, src, dst)
-    # llm.do_liquid(shard_ids, dst, src)
 
     sampling_params = SamplingParams(temperature=0, min_tokens=127, max_tokens=128)
     request_num = 1

@@ -146,6 +146,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
 
     def do_liquid(self, liquid_request: LiquidRequest, block_ids: List[int]) -> LiquidOutput:
         liquid_type = liquid_request.liquid_type
+        # scale out
         if liquid_type == LiquidType.LIQUID_1_2:
             src = 0
             dst = 1
@@ -155,7 +156,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             self.update_worker_info_map(src, dst, moved_shard_ids)
             active_ranks = self.get_active_ranks()
             self.update_active_ranks(active_ranks)
-            liquid_output = self.data_transmission(src, dst, moved_shard_ids, is_scale_out=True)
+            liquid_output = self.data_transmission(src, dst, moved_shard_ids)
 
             num_new_gpu_blocks_list = self._run_workers("determine_num_new_gpu_blocks", only_active_workers=True)
             num_new_gpu_blocks = min(num_new_gpu_blocks_list)
@@ -169,7 +170,29 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             torch.cuda.empty_cache()
             free_mem, _ = torch.cuda.mem_get_info()
             logger.info(f"extending gpu blocks takes: {extend_gpu_latency:.2f}s, there are {free_mem/(1024**3):.3f}GB left on GPU 0")
+        
+        elif liquid_type == LiquidType.LIQUID_2_4:
+            src = 0
+            dst = 3
+            self.update_worker_info_map(0,2, [1])
+            self.update_worker_info_map(1,3, [3])
+            active_ranks = self.get_active_ranks()
+            self.update_active_ranks(active_ranks)
+            liquid_output = self.data_transmission(0,2, [1])
+            liquid_output = self.data_transmission(1,3, [3])
+            num_new_gpu_blocks_list = self._run_workers("determine_num_new_gpu_blocks", only_active_workers=True)
+            num_new_gpu_blocks = min(num_new_gpu_blocks_list)
+            self.cache_config.num_gpu_blocks += num_new_gpu_blocks
+            self.num_gpu_blocks_stack.append(self.cache_config.num_gpu_blocks)
+            logger.info(f"After scale out, num_gpu_blocks: #{self.cache_config.num_gpu_blocks}")
+            start = time.time()
+            self._run_workers("extend_gpu_blocks", self.cache_config.num_gpu_blocks, worker_ranks=[0,1,2,3])
+            extend_gpu_latency = time.time() - start
+            torch.cuda.empty_cache()
+            free_mem, _ = torch.cuda.mem_get_info()
+            logger.info(f"extending gpu blocks takes: {extend_gpu_latency:.2f}s, there are {free_mem/(1024**3):.3f}GB left on GPU 0")
 
+        # scale in
         elif liquid_type == LiquidType.LIQUID_2_1:
             src = 1
             dst = 0
@@ -191,18 +214,34 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
 
             self._run_workers("move_and_shrink_gpu_blocks", src_to_dsts=src_to_dsts, num_gpu_blocks=num_gpu_blocks, worker_ranks=[src, dst])
             self.cache_config.num_gpu_blocks = num_gpu_blocks
-            liquid_output = self.data_transmission(src, dst, moved_shard_ids, is_scale_out=False)
+            liquid_output = self.data_transmission(src, dst, moved_shard_ids)
             liquid_output.src_to_dsts = src_to_dsts
 
-        elif liquid_type == LiquidType.LIQUID_2_1:
-            src = 1
-            dst = 0
+        elif liquid_type == LiquidType.LIQUID_4_2:
+            self.update_worker_info_map(2, 0, [1])
+            self.update_worker_info_map(3, 1, [3])
+            active_ranks = self.get_active_ranks()
+            self.update_active_ranks(active_ranks)
+            self.num_gpu_blocks_stack.pop()
+            num_gpu_blocks = self.num_gpu_blocks_stack[-1]
+
+            src_to_dsts: List[Tuple[int,int]] = []
+            num_src_blocks = len(block_ids)
+            for i, src_block_id in enumerate(block_ids):
+                dst_block_id = num_gpu_blocks - (num_src_blocks - i)
+                src_to_dsts.append((src_block_id,dst_block_id))   
+            self._run_workers("move_and_shrink_gpu_blocks", src_to_dsts=src_to_dsts, num_gpu_blocks=num_gpu_blocks, worker_ranks=[0,1,2,3])
+            liquid_output = self.data_transmission(2,0,[1])
+            liquid_output = self.data_transmission(3,1,[3])
+            liquid_output.src_to_dsts = src_to_dsts
+
+
             
 
         return liquid_output
 
 
-    def data_transmission(self, src: int, dst: int, shard_ids: List[int], is_scale_out) -> LiquidOutput:
+    def data_transmission(self, src: int, dst: int, shard_ids: List[int]) -> LiquidOutput:
         allocated_memory = torch.cuda.memory_allocated()
         print(f"Before liquid, allocated space on GPU 0: {allocated_memory/(1024**3):.2f} GB")
         liquid_output = LiquidOutput(shard_ids, src, dst)
@@ -221,14 +260,14 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         # load the shard data(model weights) in liquid mode
         # if the worker has not been initialized before, send all tensor from the src, if has, only send sharded tensor
         only_send_sharded_weights = self.rank_worker_info_map[dst].initialized 
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
         free_memory, total_memory = torch.cuda.mem_get_info()
         free_mem, _ = torch.cuda.mem_get_info()
         logger.info(f"Before liquid model weights, allocated space on GPU 0: {torch.cuda.memory_allocated()/(1024**3):.2f} GB, reserved space on GPU 0: {torch.cuda.memory_reserved()/(1024**3):.2f} GB, free space: {free_mem/(1024**3):.2f}GB")
         self._run_workers("liquid_model_weights", shard_ids=shard_ids, src=src, dst=dst, only_send_sharded_weights=only_send_sharded_weights, worker_ranks=[src, dst])
         liquid_output.finished_liquid_model_weights = time.time()
 
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
         free_mem, _ = torch.cuda.mem_get_info()
         logger.info(f"After liquid model weights, allocated space on GPU 0: {torch.cuda.memory_allocated()/(1024**3):.2f} GB, reserved space on GPU 0: {torch.cuda.memory_reserved()/(1024**3):.2f} GB, free space: {free_mem/(1024**3):.2f}GB")
         liquid_output.finished_init_mem = time.time()
