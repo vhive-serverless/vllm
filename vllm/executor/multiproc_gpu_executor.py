@@ -15,6 +15,7 @@ from vllm.utils import (get_distributed_init_method, get_ip, get_open_port,
 from vllm.liquid.request import LiquidRequest, LiquidOutput, LiquidType
 from vllm.liquid.liquid_worker_info import LiquidWorkerInfo
 import time
+from vllm.liquid.utils import get_cuda_mem_info
 
 logger = init_logger(__name__)
 
@@ -167,9 +168,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             start = time.time()
             self._run_workers("extend_gpu_blocks", self.cache_config.num_gpu_blocks, worker_ranks=[src, dst])
             extend_gpu_latency = time.time() - start
-            torch.cuda.empty_cache()
-            free_mem, _ = torch.cuda.mem_get_info()
-            logger.info(f"extending gpu blocks takes: {extend_gpu_latency:.2f}s, there are {free_mem/(1024**3):.3f}GB left on GPU 0")
+            logger.info(f"extending gpu blocks takes: {extend_gpu_latency:.2f}s, after extending gpu blocks: {get_cuda_mem_info()}")
         
         elif liquid_type == LiquidType.LIQUID_2_4:
             src = 0
@@ -188,9 +187,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             start = time.time()
             self._run_workers("extend_gpu_blocks", self.cache_config.num_gpu_blocks, worker_ranks=[0,1,2,3])
             extend_gpu_latency = time.time() - start
-            torch.cuda.empty_cache()
-            free_mem, _ = torch.cuda.mem_get_info()
-            logger.info(f"extending gpu blocks takes: {extend_gpu_latency:.2f}s, there are {free_mem/(1024**3):.3f}GB left on GPU 0")
+            logger.info(f"extending gpu blocks takes: {extend_gpu_latency:.2f}s, after extending gpu blocks: {get_cuda_mem_info()}")
 
         # scale in
         elif liquid_type == LiquidType.LIQUID_2_1:
@@ -244,8 +241,6 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
 
 
     def data_transmission(self, src: int, dst: int, shard_ids: List[int]) -> LiquidOutput:
-        allocated_memory = torch.cuda.memory_allocated()
-        print(f"Before liquid, allocated space on GPU 0: {allocated_memory/(1024**3):.2f} GB")
         liquid_output = LiquidOutput(shard_ids, src, dst)
         liquid_output.liquid_start = time.time()
         # check if the src is active
@@ -263,15 +258,12 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         # if the worker has not been initialized before, send all tensor from the src, if has, only send sharded tensor
         only_send_sharded_weights = self.rank_worker_info_map[dst].initialized 
         # torch.cuda.empty_cache()
-        free_memory, total_memory = torch.cuda.mem_get_info()
-        free_mem, _ = torch.cuda.mem_get_info()
-        logger.info(f"Before liquid model weights, allocated space on GPU 0: {torch.cuda.memory_allocated()/(1024**3):.2f} GB, reserved space on GPU 0: {torch.cuda.memory_reserved()/(1024**3):.2f} GB, free space: {free_mem/(1024**3):.2f}GB")
+        logger.info(f"Before liquid model weights, {get_cuda_mem_info()}")
         self._run_workers("liquid_model_weights", shard_ids=shard_ids, src=src, dst=dst, only_send_sharded_weights=only_send_sharded_weights, worker_ranks=[src, dst])
         liquid_output.finished_liquid_model_weights = time.time()
 
-        # torch.cuda.empty_cache()
-        free_mem, _ = torch.cuda.mem_get_info()
-        logger.info(f"After liquid model weights, allocated space on GPU 0: {torch.cuda.memory_allocated()/(1024**3):.2f} GB, reserved space on GPU 0: {torch.cuda.memory_reserved()/(1024**3):.2f} GB, free space: {free_mem/(1024**3):.2f}GB")
+        
+        logger.info(f"After liquid model weights, {get_cuda_mem_info()}")
         liquid_output.finished_init_mem = time.time()
 
         # if dst has not initialize, then kv cache should be loaded, otherwise it should be appended
@@ -280,10 +272,8 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         load_kv_cache = not self.rank_worker_info_map[dst].initialized
         self._run_workers("liquid_kv_cache", shard_ids=shard_ids, src=src, dst=dst, load_kv_cache = load_kv_cache, worker_ranks=[src, dst])
         liquid_output.finished_liquid_kvc = time.time()
-        torch.cuda.empty_cache()
-        free_mem, _ = torch.cuda.mem_get_info()
-        logger.info(f"After liquid kvc, allocated space on GPU 0: {torch.cuda.memory_allocated()/(1024**3):.2f} GB, reserved space on GPU 0: {torch.cuda.memory_reserved()/(1024**3):.2f} GB, free space: {free_mem/(1024**3):.2f}GB")
 
+        logger.info(f"After liquid kvc, {get_cuda_mem_info()}")
         self.rank_worker_info_map[dst].initialized = True
          
         return liquid_output

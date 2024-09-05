@@ -135,7 +135,11 @@ class ShardedParameter(Parameter):
         self.shard_ids.append(shard_id) 
 
     def append_shards(self, start_shard_id:int, end_shard_id: int, shard_data: torch.Tensor) -> None:
-        self.data = self._append_shard(self.data, shard_data)
+        # self.data = self._append_shard(self.data, shard_data)
+        if self.shard_ids == []:
+            self.data = shard_data.clone()
+        else:
+            self.extend_and_load_shard(shard_data)
         for shard_id in range(start_shard_id, end_shard_id):
             self.shard_ids.append(shard_id)
 
@@ -207,7 +211,6 @@ class QKVShardedParameter(ShardedParameter):
 
         index = self.shard_ids.index(shard_id)
         self.shard_ids.pop(index)
-        # torch.cuda.empty_cache()
 
     def delete_shards(self, start_shard_id: int, end_shard_id: int):
         q_data, k_data, v_data = self.data.chunk(3, self.shard_dim)
@@ -222,7 +225,6 @@ class QKVShardedParameter(ShardedParameter):
         for shard_id in range(start_shard_id, end_shard_id):
             index = self.shard_ids.index(shard_id)
             self.shard_ids.pop(index)
-        # torch.cuda.empty_cache()
         
     
     
@@ -242,26 +244,34 @@ class QKVShardedParameter(ShardedParameter):
 
         self.shard_ids.append(shard_id) 
 
+    # def append_shards(self, start_shard_id: int, end_shard_id: int,q_shard: torch.Tensor, k_shard: torch.Tensor, v_shard: torch.Tensor) -> None:
+
+
+    #     q_data, k_data, v_data = self.data.chunk(3, self.shard_dim)
+    #     q_data = self._append_shard(q_data, q_shard)
+    #     k_data = self._append_shard(k_data, k_shard)
+    #     v_data = self._append_shard(v_data, v_shard)
+
+    #     self.data = torch.cat([q_data, k_data, v_data], dim=self.shard_dim)
+    #     del q_data, k_data, v_data
+    #     # del self.q_data, self.k_data, self.v_data
+    #     # self.q_data, self.k_data, self.v_data = self.data.chunk(3)
+
+    #     for shard_id in range(start_shard_id, end_shard_id):
+    #         self.shard_ids.append(shard_id) 
+
     def append_shards(self, start_shard_id: int, end_shard_id: int,q_shard: torch.Tensor, k_shard: torch.Tensor, v_shard: torch.Tensor) -> None:
-
-
-        q_data, k_data, v_data = self.data.chunk(3, self.shard_dim)
-        q_data = self._append_shard(q_data, q_shard)
-        k_data = self._append_shard(k_data, k_shard)
-        v_data = self._append_shard(v_data, v_shard)
-
-        self.data = torch.cat([q_data, k_data, v_data], dim=self.shard_dim)
-        del q_data, k_data, v_data
-        # del self.q_data, self.k_data, self.v_data
-        # self.q_data, self.k_data, self.v_data = self.data.chunk(3)
-
+        if self.shard_ids == []:
+            self.data = torch.cat([q_shard, k_shard, v_shard])
+        else:
+            self.extend_and_load_shard(q_shard, k_shard, v_shard)
         for shard_id in range(start_shard_id, end_shard_id):
             self.shard_ids.append(shard_id) 
+
 
     def extend_and_load_shard(self, q_shard: torch.Tensor, k_shard: torch.Tensor, v_shard: torch.Tensor) -> None:
         # extend current shard by half along self.shard_dim
 
-        # extend current shard by half along self.shard_dim
         shape = list(self.data.shape)
         shape[self.shard_dim] = shape[self.shard_dim] * 2
         new_shape = torch.Size(shape)

@@ -131,3 +131,14 @@ def get_tensor_num_bytes(tensor: torch.Tensor) -> int:
     # Calculate the total memory occupied (in bytes)
     total_memory_bytes = (num_elements * bits) // 8
     return total_memory_bytes
+
+DEBUG_MODE = True
+
+def get_cuda_mem_info() -> str:
+        if DEBUG_MODE:
+            torch.cuda.empty_cache()
+        free_mem, _ = torch.cuda.mem_get_info()
+        allocated_space = torch.cuda.memory_allocated()
+        researved_space = torch.cuda.memory_reserved()
+     
+        return f"allocated space on GPU: {allocated_space/(1024**3):.3f} GB, reserved space on GPU: {researved_space/(1024**3):.3f} GB, free space: {free_mem/(1024**3):.3f}GB, frag space: {(researved_space - allocated_space)/(1024**3):.3f}GB"

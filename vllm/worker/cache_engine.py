@@ -101,32 +101,15 @@ class CacheEngine:
     def extend_gpu_blocks(self, num_gpu_blocks: int):
         assert num_gpu_blocks > self.num_gpu_blocks
         kv_cache_shape = self.attn_backend.get_kv_cache_shape(num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size)
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-        init_free_mem, _ = torch.cuda.mem_get_info()
-        print(f"available space before extending GPU blocks: {init_free_mem/(1024**3):.3f}GB")
-        last_free_mem = init_free_mem
         for i in range(self.num_layers):
             new_cache = torch.empty(kv_cache_shape, dtype=self.dtype, pin_memory=False, device="cuda")
-            # torch.cuda.synchronize()
             original_num_blocks = self.gpu_cache[i].size(1)
             new_cache[:,:original_num_blocks, ...].copy_(self.gpu_cache[i])
             self.gpu_cache[i].data = new_cache
-            # torch.cuda.synchronize()
-            # torch.cuda.empty_cache()
-            # gc.collect()
             
 
-            # torch.cuda.synchronize()
-            free_mem, _ = torch.cuda.mem_get_info()
-            decreased_free_mem = last_free_mem - free_mem 
-            last_free_mem = free_mem
-            # print(f"After extending layer {i}, free mem decreased is: {decreased_free_mem/(1024**2):.3f} MB!")
 
         self.num_gpu_blocks = num_gpu_blocks
-        torch.cuda.empty_cache()
-        free_mem, _ = torch.cuda.mem_get_info()
-        print(f"available space after extending GPU blocks: {free_mem/(1024**3):.3f}GB, free_mem decreased: {(init_free_mem - free_mem)/(1024**3):.3f}GB")
 
     def move_gpu_blocks(self, src_to_dsts: List[Tuple[int,int]]):
         if src_to_dsts == []: return 
@@ -144,7 +127,6 @@ class CacheEngine:
             start = time.time()
             new_cache = torch.zeros(kv_cache_shape, dtype=self.dtype, pin_memory=False, device="cuda")
             allocate_latency = time.time() - start
-            # print(f"allocate tensor when shrink takes: {allocate_latency:.3f}s, tensor shape: {new_cache.shape}")
 
             start_copied_block_number = num_gpu_blocks - len(src_to_dsts)
             new_cache[:,start_copied_block_number:, ...] = self.gpu_cache[i][:,start_copied_block_number:num_gpu_blocks, ...]
