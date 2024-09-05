@@ -23,6 +23,8 @@ class HttpRequestBody(BaseModel):
     prompt: str
     request_id: int
     max_response_length: int
+    global_request_id: int
+    prompt_length: int
 
 
 class UvicornServer(Server):

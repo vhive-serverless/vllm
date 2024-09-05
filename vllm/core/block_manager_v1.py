@@ -192,6 +192,7 @@ class UncachedBlockAllocator(BlockAllocatorBase):
 
         else:
             self.free_blocks = [free_block for free_block in self.free_blocks if free_block.block_number < free_gpu_end]
+        self.num_blocks = num_gpu_blocks
 
 
     def allocate(self,

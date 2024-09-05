@@ -134,6 +134,7 @@ class CacheEngine:
                                       device="cuda",
                                       dtype=torch.int64).view(-1, 2)
         self.copy(blocks_to_copy)
+        torch.cuda.synchronize()
         
 
     def shrink_gpu_blocks(self, src_to_dsts: List[Tuple[int,int]], num_gpu_blocks: int):
@@ -203,24 +204,8 @@ class CacheEngine:
         logger.info(f"After deleting layer's shard, free mem: {free_mem/(1024**2):.2f}MB")
         for i, cache in enumerate(self.gpu_cache):
             cache.delete_shards(start_shard_id, end_shard_id) 
-            # torch.cuda.empty_cache()
-            # free_mem,_ = torch.cuda.mem_get_info()
-            # logger.info(f"After deleting layer's shard, free mem increased by: {(free_mem - latest_free_mem)/(1024**2):.2f}MB")
-            # latest_free_mem = free_mem
-            # if i % 4 == 0:
             torch.cuda.empty_cache()
-        # torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-        
-        # for cache in self.gpu_cache:
-        #     cache.data = torch.empty(0)
-        #     torch.cuda.empty_cache()
-        #     free_mem,_ = torch.cuda.mem_get_info()
-        #     logger.info(f"After delete layer, free mem increased by: {(free_mem - latest_free_mem)/(1024**2):.2f}MB")
-        #     latest_free_mem = free_mem
-        # TODO: handle cpu cache
-        # for cache in self.cpu_cache:
-        #     cache.delete_shard(shard_id)
+
         for shard_id in range(start_shard_id, end_shard_id):
             index = self.shard_ids.index(shard_id)
             self.shard_ids.pop(index)

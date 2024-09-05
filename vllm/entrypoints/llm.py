@@ -529,10 +529,11 @@ class LLM:
     def _add_request(
         self,
         inputs: PromptInputs,
+        global_id: int,
         params: Union[SamplingParams, PoolingParams],
         lora_request: Optional[Union[List[LoRARequest], LoRARequest]] = None,
     ) -> None:
-        request_id = str(next(self.request_counter))
+        request_id = str(global_id)
         self.llm_engine.add_request(request_id,
                                     inputs,
                                     params,
