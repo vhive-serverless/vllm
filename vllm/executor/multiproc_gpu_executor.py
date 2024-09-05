@@ -230,6 +230,8 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             for i, src_block_id in enumerate(block_ids):
                 dst_block_id = num_gpu_blocks - (num_src_blocks - i)
                 src_to_dsts.append((src_block_id,dst_block_id))   
+
+            logger.info(f"Shrink to: #{num_gpu_blocks}, currently using blocks: #{len(src_to_dsts)}")
             self._run_workers("move_and_shrink_gpu_blocks", src_to_dsts=src_to_dsts, num_gpu_blocks=num_gpu_blocks, worker_ranks=[0,1,2,3])
             liquid_output = self.data_transmission(2,0,[1])
             liquid_output = self.data_transmission(3,1,[3])

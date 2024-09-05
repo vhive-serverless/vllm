@@ -15,19 +15,22 @@ class LiquidServer:
             enforce_eager=True,
             # load_format="auto",
             # tensor_parallel_size=2,
-            liquid_gpu_range = [0,1],
+            liquid_gpu_range = [0,1,2,3],
             liquid_gpu_space = 32,
             liquid_driver_gpu_id = 0, 
-            liquid_total_num_shards = 2,
+            liquid_total_num_shards = 4,
             # gpu_memory_utilization=0.7,
         )
         @self.fastapi_app.post("/v1/completions")
         async def enqueue_request(r: HttpRequestBody) -> None:
             print(f"{r.request_id} received!")
             max_model_length = self.llm.llm_engine.model_config.max_model_len
+            if r.max_response_length + r.prompt_length > max_model_length:
+                return
             sampling_params = SamplingParams(max_tokens=r.max_response_length+1, min_tokens=r.max_response_length, temperature=0)
             self.llm._add_request(
                 inputs=r.prompt,
+                global_id=r.global_request_id,
                 params=sampling_params
             )
         self.http_server = UvicornServer(
@@ -44,63 +47,68 @@ class LiquidServer:
 
         command = [
                 './LLMLoadgen',
-                '-pattern', 'azure-multiplex-70-5',
-                '-dataset', 'azure-multiplex',
+                '-pattern', 'azure-conv-70-5',
+                '-dataset', 'azure-conv',
                 '-dst', 'liquid',
                 '-ip', 'localhost',
                 '-port', '8000',
-                '-limit', '100',
+                # '-limit', '100',
                 '-max_drift', '100',
                 '-model_name', f'{model_name}'
             ]
-        working_dir = './LLMLoadgen/LLMLoadgen-0.9/release'
+        working_dir = '/home/lrq/baseline/LLMLoadgen/release'
         loadgen_process = subprocess.Popen(command, cwd=working_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         loadgen_running = True
         request_outputs: List[RequestOutput] = []
-        while loadgen_running:
-            self.llm._run_engine(use_tqdm=False)
-            while self.llm.llm_engine.request_output_queue.qsize() != 0:
-                request_output = self.llm.llm_engine.request_output_queue.get()
-                print(f"request: {request_output.request_id} finished!")
-                request_outputs.append(request_output)
+        print("Loadgen started!")
+        try:
+            while loadgen_running:
+                self.llm._run_engine(use_tqdm=False)
+                while self.llm.llm_engine.request_output_queue.qsize() != 0:
+                    request_output = self.llm.llm_engine.request_output_queue.get()
+                    print(f"request: {request_output.request_id} finished!")
+                    request_outputs.append(request_output)
 
-            loadgen_running = (loadgen_process.poll() is None)
-        print(f"All requests have been processed!")
+                loadgen_running = (loadgen_process.poll() is None)
+        except Exception as e:
+            print(f"Error: {e}")
+        finally:
+            print(f"All requests have been processed!")
 
-        # store all the results
-        timestamps = self.llm.llm_engine.auto_scaler.timestamp_records
-        tp_level_records = self.llm.llm_engine.auto_scaler.tp_level_records
-        cache_usage_records = self.llm.llm_engine.auto_scaler.cache_usage_records
+            # store all the results
+            timestamps = self.llm.llm_engine.auto_scaler.timestamp_records
+            tp_level_records = self.llm.llm_engine.auto_scaler.tp_level_records
+            cache_usage_records = self.llm.llm_engine.auto_scaler.cache_usage_records
         
-        arrival_times = []
-        e2e_latencys = []
-        queueing_latencys = []
-        serving_latencys = []
-        for request_output in request_outputs:
-            metrics = request_output.metrics
+            arrival_times = []
+            e2e_latencys = []
+            queueing_latencys = []
+            serving_latencys = []
+            for request_output in request_outputs:
+                metrics = request_output.metrics
             
-            e2e_latency = metrics.finished_time - metrics.arrival_time
-            queueing_latency = metrics.time_in_queue if metrics.time_in_queue else 0
-            serving_latency = e2e_latency - queueing_latency
+                e2e_latency = metrics.finished_time - metrics.arrival_time
+                queueing_latency = metrics.time_in_queue if metrics.time_in_queue else 0
+                serving_latency = e2e_latency - queueing_latency
 
-            arrival_times.append(metrics.arrival_time)
-            e2e_latencys.append(e2e_latency)
-            queueing_latencys.append(queueing_latency)
-            serving_latencys.append(serving_latency)
+                arrival_times.append(metrics.arrival_time)
+                e2e_latencys.append(e2e_latency)
+                queueing_latencys.append(queueing_latency)
+                serving_latencys.append(serving_latency)
 
-        data = {
-            "timestamps": timestamps,
-            "tp_level_records": tp_level_records,
-            "cache_usage_records": cache_usage_records,
-            "arrival_times": arrival_times,
-            "e2e_latencys": e2e_latencys,
-            "queueing_latencys": queueing_latencys,
-            "serving_latencys": serving_latencys,
-        }
+            data = {
+                "timestamps": timestamps,
+                "tp_level_records": tp_level_records,
+                "cache_usage_records": cache_usage_records,
+                "arrival_times": arrival_times,
+                "e2e_latencys": e2e_latencys,
+                "queueing_latencys": queueing_latencys,
+                "serving_latencys": serving_latencys,
+            }
 
-        # Dump the data to a JSON file
-        with open('liquid_results/liquid_results.json', 'w') as json_file:
-            json.dump(data, json_file, indent=4)  # indent=4 for pretty printing
+            # Dump the data to a JSON file
+            with open('liquid_results.json', 'w') as json_file:
+                json.dump(data, json_file, indent=4)  # indent=4 for pretty printing
         
         del self.llm
         self.http_server.stop()
