@@ -360,6 +360,17 @@ class OPTForCausalLM(nn.Module):
             if hasattr(param, "shard_ids"):
                 yield name, param
 
+    def sorted_named_parameters(self):
+        # sort the parameters first to avoid a memory fragmentation
+        # Get the named parameters of the model
+        named_params = list(self.named_parameters())
+        
+        # Sort the named parameters based on the number of elements (numel()) in descending order
+        sorted_named_params = sorted(named_params, key=lambda x: x[1].numel(), reverse=True)
+        
+        return sorted_named_params
+        
+
 
     def get_shards_weights(self, shard_ids: List[int], only_sharded: bool = True) -> Dict[str, torch.Tensor]:
         results = {}
@@ -370,7 +381,7 @@ class OPTForCausalLM(nn.Module):
             start_shard_id = shard_ids[0]
             end_shard_id = shard_ids[-1] + 1
 
-        for name, param in self.named_parameters():
+        for name, param in self.sorted_named_parameters():
             if isinstance(param, QKVShardedParameter):
                 q_shard, k_shard, v_shard = param.get_shards(start_shard_id, end_shard_id)
                 results[f"{name}_q"] = q_shard
@@ -381,6 +392,8 @@ class OPTForCausalLM(nn.Module):
             else:
                 if not only_sharded:
                     results[name] = param
+        # sort the results to reduce memory fragmentation
+        sorted_tensor_dict = dict(sorted(results.items(), key=lambda x: x[1].numel(), reverse=True))
         return results
 
     def delete_shards(self, shard_ids: List[int]) -> None:
@@ -418,7 +431,7 @@ class OPTForCausalLM(nn.Module):
             end_shard_id = shard_ids[-1] + 1
         shard_id = shard_ids[0]
         assert shard_id in self.shard_ids, f"{shard_id} not in the model"
-        for name, param in self.named_parameters():
+        for name, param in self.sorted_named_parameters():
             if isinstance(param, QKVShardedParameter):
                 q_shard = shards_weights[f"{name}_q"]
                 k_shard = shards_weights[f"{name}_k"]
@@ -448,7 +461,7 @@ class OPTForCausalLM(nn.Module):
         print(f"Before entering for loop, allocated space on GPU 0: {torch.cuda.memory_allocated()/(1024**3):.2f} GB, reserved space on GPU 0: {torch.cuda.memory_reserved()/(1024**3):.2f} GB, free space: {free_mem/(1024**3):.2f}GB")
         torch.cuda.memory._record_memory_history(max_entries=100000, context="all")
         with torch.no_grad():
-            for name, param in self.named_parameters():
+            for name, param in self.sorted_named_parameters():
                 if isinstance(param, QKVShardedParameter):
                     q_shard = shards_weights[f"{name}_q"]
                     k_shard = shards_weights[f"{name}_k"]
