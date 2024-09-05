@@ -518,6 +518,7 @@ class LLM:
         for i, request_inputs in enumerate(inputs):
             self._add_request(
                 request_inputs,
+                0,
                 params[i] if isinstance(params, Sequence) else params,
                 lora_request=lora_request[i] if isinstance(
                     lora_request, Sequence) else lora_request,

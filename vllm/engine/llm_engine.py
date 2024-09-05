@@ -751,6 +751,8 @@ class LLMEngine:
         if self.liquid_request_queue.qsize() != 0:
             liquid_request = self.liquid_request_queue.get()
             try:
+
+                # torch.cuda.memory._record_memory_history(max_entries=100000)
                 liquid_output = self._do_liquid(liquid_request)
                 torch.cuda.empty_cache()
                 free_mem, _ = torch.cuda.mem_get_info()
@@ -758,7 +760,9 @@ class LLMEngine:
                 self.liquid_count += 1
             except Exception as e:
                 logger.error(f"Failed to perform liquid! error: {e}")
-                raise Exception(e)
+                # torch.cuda.memory._record_memory_history(enabled=None)
+                # torch.cuda.memory._dump_snapshot(f"./torch_mem_dump.pickle")
+                # raise Exception(e)
 
     def step(self) -> List[Union[RequestOutput, EmbeddingRequestOutput]]:
         """Performs one decoding iteration and returns newly generated results.

@@ -2,6 +2,7 @@ import torch
 from torch.nn.parameter import Parameter
 from typing import List, Optional, Any, Dict
 
+
 class ShardedParameter(Parameter):
     def __new__(cls, data=None, requires_grad=False, num_shards=1, shard_dim=0, shard_ids=None):
         # Call the __new__ method of the Parameter class
@@ -82,7 +83,7 @@ class ShardedParameter(Parameter):
         del before_shard, after_shard
         return new_data
 
-    def delete_shards(self, start_shard_id: int, end_shard_id: int) -> torch.Tensor:
+    def delete_shards(self, start_shard_id: int, end_shard_id: int) -> None:
         new_data = self._delete_shards(self.data, start_shard_id, end_shard_id)
         self.data = new_data
 
@@ -100,7 +101,6 @@ class ShardedParameter(Parameter):
 
         index = self.shard_ids.index(shard_id)
         self.shard_ids.pop(index)
-        # torch.cuda.empty_cache()
 
 
     def _is_appendable(self, shard_data: torch.Tensor) -> bool:
@@ -139,6 +139,28 @@ class ShardedParameter(Parameter):
         for shard_id in range(start_shard_id, end_shard_id):
             self.shard_ids.append(shard_id)
 
+    def _in_place_cat(self, new_tensor: torch.Tensor, old_tensor: torch.Tensor, shard: torch.Tensor):
+        # In place cat, old tensor at front, new tensor at back
+        first_half, last_half = new_tensor.chunk(dim=self.shard_dim, chunks=2)
+        assert first_half.shape == old_tensor.shape
+        first_half.copy_(old_tensor)
+        assert last_half.shape == shard.shape
+        last_half.copy_(shard)
+
+    def extend_and_load_shard(self, shard_data: torch.Tensor) -> None:
+        # extend current shard by half along self.shard_dim
+        shape = list(self.data.shape)
+        shape[self.shard_dim] = shape[self.shard_dim] * 2
+        new_shape = torch.Size(shape)
+        new_data = torch.empty(
+            size=new_shape,
+            dtype=self.data.dtype,
+            device=self.data.device,
+        )
+        self._in_place_cat(new_data, self.data, shard_data)
+        self.data = new_data
+
+
 class QKVShardedParameter(ShardedParameter):
     def __init__(self, 
                  data: torch.Tensor,
@@ -155,48 +177,52 @@ class QKVShardedParameter(ShardedParameter):
         # self.q_data = self.narrow(shard_dim, 0, qkv_shard_size)
         # self.k_data = self.narrow(shard_dim, qkv_shard_size, qkv_shard_size)
         # self.v_data = self.narrow(shard_dim, 2*qkv_shard_size, qkv_shard_size)
-        self.q_data, self.k_data, self.v_data = data.chunk(3, shard_dim)
+        # self.q_data, self.k_data, self.v_data = data.chunk(3, shard_dim)
 
     def get_shard(self, shard_id: int) -> torch.Tensor:
-        q_shard = self._get_shard(self.q_data, shard_id)
-        k_shard = self._get_shard(self.k_data, shard_id)
-        v_shard = self._get_shard(self.v_data, shard_id)
+        q_data, k_data, v_data = self.data.chunk(3, self.shard_dim)
+        q_shard = self._get_shard(q_data, shard_id)
+        k_shard = self._get_shard(k_data, shard_id)
+        v_shard = self._get_shard(v_data, shard_id)
 
         return q_shard, k_shard, v_shard
 
     def get_shards(self, start_shard_id: int, end_shard_id: int) -> torch.Tensor:
-        q_shards = self._get_shards(self.q_data, start_shard_id, end_shard_id)
-        k_shards = self._get_shards(self.k_data, start_shard_id, end_shard_id)
-        v_shards = self._get_shards(self.v_data, start_shard_id, end_shard_id)
+        q_data, k_data, v_data = self.data.chunk(3, self.shard_dim)
+        q_shards = self._get_shards(q_data, start_shard_id, end_shard_id)
+        k_shards = self._get_shards(k_data, start_shard_id, end_shard_id)
+        v_shards = self._get_shards(v_data, start_shard_id, end_shard_id)
         return q_shards, k_shards, v_shards
 
     def delete_shard(self, shard_id: int) -> None:
-        q_data = self._delete_shard(self.q_data, shard_id)
-        k_data = self._delete_shard(self.k_data, shard_id)
-        v_data = self._delete_shard(self.v_data, shard_id)
+        q_data, k_data, v_data = self.data.chunk(3, self.shard_dim)
+        q_data = self._delete_shard(q_data, shard_id)
+        k_data = self._delete_shard(k_data, shard_id)
+        v_data = self._delete_shard(v_data, shard_id)
 
         new_data = torch.cat([q_data, k_data, v_data], dim=self.shard_dim)
         self.data = new_data
         # del q_data, k_data, v_data
-        self.q_data, self.k_data, self.v_data = self.data.chunk(3, self.shard_dim)
+        # self.q_data, self.k_data, self.v_data = self.data.chunk(3, self.shard_dim)
 
         index = self.shard_ids.index(shard_id)
         self.shard_ids.pop(index)
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
 
     def delete_shards(self, start_shard_id: int, end_shard_id: int):
-        q_data = self._delete_shards(self.q_data, start_shard_id, end_shard_id)
-        k_data = self._delete_shards(self.k_data, start_shard_id, end_shard_id)
-        v_data = self._delete_shards(self.v_data, start_shard_id, end_shard_id)
+        q_data, k_data, v_data = self.data.chunk(3, self.shard_dim)
+        q_data = self._delete_shards(q_data, start_shard_id, end_shard_id)
+        k_data = self._delete_shards(k_data, start_shard_id, end_shard_id)
+        v_data = self._delete_shards(v_data, start_shard_id, end_shard_id)
         new_data = torch.cat([q_data, k_data, v_data], dim=self.shard_dim)
         self.data = new_data
         # del q_data, k_data, v_data
-        self.q_data, self.k_data, self.v_data = self.data.chunk(3, self.shard_dim)
+        # self.q_data, self.k_data, self.v_data = self.data.chunk(3, self.shard_dim)
 
         for shard_id in range(start_shard_id, end_shard_id):
             index = self.shard_ids.index(shard_id)
             self.shard_ids.pop(index)
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
         
     
     
@@ -205,27 +231,51 @@ class QKVShardedParameter(ShardedParameter):
             raise ValueError(f"shard_id: {shard_id} is already in self.shard_ids")
 
 
-        self.q_data = self._append_shard(self.q_data, q_shard)
-        self.k_data = self._append_shard(self.k_data, k_shard)
-        self.v_data = self._append_shard(self.v_data, v_shard)
+        q_data, k_data, v_data = self.data.chunk(3, self.shard_dim)
+        q_data = self._append_shard(q_data, q_shard)
+        k_data = self._append_shard(k_data, k_shard)
+        v_data = self._append_shard(v_data, v_shard)
 
-        self.data = torch.cat([self.q_data, self.k_data, self.v_data], dim=self.shard_dim)
-        del self.q_data, self.k_data, self.v_data
-        self.q_data, self.k_data, self.v_data = self.data.chunk(3)
+        self.data = torch.cat([q_data, k_data, v_data], dim=self.shard_dim)
+        # del self.q_data, self.k_data, self.v_data
+        # self.q_data, self.k_data, self.v_data = self.data.chunk(3)
 
         self.shard_ids.append(shard_id) 
 
     def append_shards(self, start_shard_id: int, end_shard_id: int,q_shard: torch.Tensor, k_shard: torch.Tensor, v_shard: torch.Tensor) -> None:
 
 
-        q_data = self._append_shard(self.q_data, q_shard)
-        k_data = self._append_shard(self.k_data, k_shard)
-        v_data = self._append_shard(self.v_data, v_shard)
+        q_data, k_data, v_data = self.data.chunk(3, self.shard_dim)
+        q_data = self._append_shard(q_data, q_shard)
+        k_data = self._append_shard(k_data, k_shard)
+        v_data = self._append_shard(v_data, v_shard)
 
         self.data = torch.cat([q_data, k_data, v_data], dim=self.shard_dim)
         del q_data, k_data, v_data
-        del self.q_data, self.k_data, self.v_data
-        self.q_data, self.k_data, self.v_data = self.data.chunk(3)
+        # del self.q_data, self.k_data, self.v_data
+        # self.q_data, self.k_data, self.v_data = self.data.chunk(3)
 
         for shard_id in range(start_shard_id, end_shard_id):
             self.shard_ids.append(shard_id) 
+
+    def extend_and_load_shard(self, q_shard: torch.Tensor, k_shard: torch.Tensor, v_shard: torch.Tensor) -> None:
+        # extend current shard by half along self.shard_dim
+
+        # extend current shard by half along self.shard_dim
+        shape = list(self.data.shape)
+        shape[self.shard_dim] = shape[self.shard_dim] * 2
+        new_shape = torch.Size(shape)
+        new_data = torch.empty(
+            size=new_shape,
+            dtype=self.data.dtype,
+            device=self.data.device,
+        )
+        q_data, k_data, v_data =self.data.chunk(chunks=3, dim=self.shard_dim)
+        new_q_data, new_k_data, new_v_data = new_data.chunk(chunks=3, dim=self.shard_dim)
+
+        self._in_place_cat(new_q_data, q_data, q_shard)
+        self._in_place_cat(new_k_data, k_data, k_shard)
+        self._in_place_cat(new_v_data, v_data, v_shard)
+        # self.q_data, self.k_data, self.v_data = self.data.chunk(3, dim=self.shard_dim)
+
+        self.data = new_data
