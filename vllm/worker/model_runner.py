@@ -180,10 +180,6 @@ class ModelRunner:
             else:
                 if not only_sharded:
                     param_names.append(name)
-        # if only_sharded:
-        #     param_names = [name for name, _ in self.model.named_sharded_parameters()]
-        # else:
-        #     param_names = [name for name, _ in self.model.named_parameters()]
         shards_weights = liquid_comm.recv_dict(src, param_names)
         return shards_weights
 
