@@ -17,10 +17,10 @@ def main():
         enforce_eager=True,
         # load_format="auto",
         # tensor_parallel_size=2,
-        liquid_gpu_range = [0,1,2,3],
+        liquid_gpu_range = [0,1],
         liquid_gpu_space = 32,
         liquid_driver_gpu_id = 0, 
-        liquid_total_num_shards = 4,
+        liquid_total_num_shards = 2,
         # gpu_memory_utilization=0.7,
     )
 

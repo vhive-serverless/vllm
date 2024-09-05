@@ -281,8 +281,8 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         self._run_workers("liquid_kv_cache", shard_ids=shard_ids, src=src, dst=dst, load_kv_cache = load_kv_cache, worker_ranks=[src, dst])
         liquid_output.finished_liquid_kvc = time.time()
         torch.cuda.empty_cache()
-        free_memory, total_memory = torch.cuda.mem_get_info()
-        logger.info(f"After liquid model kvc, remaining space on GPU 0: {free_memory/(1024**3):.2f} GB")
+        free_mem, _ = torch.cuda.mem_get_info()
+        logger.info(f"After liquid kvc, allocated space on GPU 0: {torch.cuda.memory_allocated()/(1024**3):.2f} GB, reserved space on GPU 0: {torch.cuda.memory_reserved()/(1024**3):.2f} GB, free space: {free_mem/(1024**3):.2f}GB")
 
         self.rank_worker_info_map[dst].initialized = True
          

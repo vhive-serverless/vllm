@@ -424,9 +424,10 @@ class OPTForCausalLM(nn.Module):
                 k_shard = shards_weights[f"{name}_k"]
                 v_shard = shards_weights[f"{name}_v"]
                 # print(param.requires_grad)
-                param.q_data.copy_(q_shard)
-                param.k_data.copy_(k_shard)
-                param.v_data.copy_(v_shard)
+                q_data, k_data, v_data = param.chunk(3, dim=param.shard_dim)
+                q_data.copy_(q_shard)
+                k_data.copy_(k_shard)
+                v_data.copy_(v_shard)
             else:
                 param.data.copy_(shards_weights[name])
             # if name in shards_weights.keys():
@@ -445,21 +446,28 @@ class OPTForCausalLM(nn.Module):
             end_shard_id = shard_ids[-1]+1
         free_mem, _ = torch.cuda.mem_get_info()
         print(f"Before entering for loop, allocated space on GPU 0: {torch.cuda.memory_allocated()/(1024**3):.2f} GB, reserved space on GPU 0: {torch.cuda.memory_reserved()/(1024**3):.2f} GB, free space: {free_mem/(1024**3):.2f}GB")
-        for name, param in self.named_parameters():
-            if isinstance(param, QKVShardedParameter):
-                q_shard = shards_weights[f"{name}_q"]
-                k_shard = shards_weights[f"{name}_k"]
-                v_shard = shards_weights[f"{name}_v"]
-                param.append_shards(start_shard_id, end_shard_id ,q_shard, k_shard, v_shard)
-                del q_shard, k_shard, v_shard
-                del shards_weights[f"{name}_q"], shards_weights[f"{name}_k"], shards_weights[f"{name}_v"]
-                # torch.cuda.empty_cache()
-            elif isinstance(param, ShardedParameter):
-                param.append_shards(start_shard_id, end_shard_id ,shards_weights[name])
-                del shards_weights[name]
+        torch.cuda.memory._record_memory_history(max_entries=100000, context="all")
+        with torch.no_grad():
+            for name, param in self.named_parameters():
+                if isinstance(param, QKVShardedParameter):
+                    q_shard = shards_weights[f"{name}_q"]
+                    k_shard = shards_weights[f"{name}_k"]
+                    v_shard = shards_weights[f"{name}_v"]
+                    # param.append_shards(start_shard_id, end_shard_id ,q_shard, k_shard, v_shard)
+                    param.extend_and_load_shard(q_shard, k_shard, v_shard)
+                    del q_shard, k_shard, v_shard
+                    del shards_weights[f"{name}_q"], shards_weights[f"{name}_k"], shards_weights[f"{name}_v"]
+                    # torch.cuda.empty_cache()
+                elif isinstance(param, ShardedParameter):
+                    # param.append_shards(start_shard_id, end_shard_id ,shards_weights[name])
+                    param.extend_and_load_shard(shard_data=shards_weights[name])
+                    del shards_weights[name]
+            # torch.cuda.empty_cache()
         torch.cuda.empty_cache()
         free_mem, _ = torch.cuda.mem_get_info()
         print(f"After exiting for loop, allocated space on GPU 0: {torch.cuda.memory_allocated()/(1024**3):.2f} GB, reserved space on GPU 0: {torch.cuda.memory_reserved()/(1024**3):.2f} GB, free space: {free_mem/(1024**3):.2f}GB")
+        torch.cuda.memory._dump_snapshot(f"./torch_mem_dump.pickle")
+        torch.cuda.memory._record_memory_history(enabled=None)
         
         for layer in self.model.decoder.layers:
             for shard_id in range(start_shard_id, end_shard_id):
