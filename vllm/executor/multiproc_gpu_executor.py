@@ -154,7 +154,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             shard_ids = list(range(self.liquid_config.liquid_total_num_shards))
             moved_length = int(self.liquid_config.liquid_total_num_shards / 2)
             moved_shard_ids = shard_ids[moved_length:]
-            liquid_output = LiquidOutput(srcs=[0], dsts=[1], shard_ids=shard_ids, is_scale_out=True)
+            liquid_output = LiquidOutput(srcs=[0], dsts=[1], shard_ids=moved_shard_ids, is_scale_out=True)
             liquid_output.liquid_start = time.time()
             self.update_worker_info_map(src, dst, moved_shard_ids)
             active_ranks = self.get_active_ranks()
@@ -192,10 +192,10 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             src = 1
             dst = 0
             shard_ids = list(range(self.liquid_config.liquid_total_num_shards))
-            liquid_output = LiquidOutput(srcs=[1], dsts=[0], shard_ids=shard_ids, is_scale_out=False)
-            liquid_output.liquid_start = time.time()
             moved_length = int(self.liquid_config.liquid_total_num_shards / 2)
             moved_shard_ids = shard_ids[moved_length:]
+            liquid_output = LiquidOutput(srcs=[1], dsts=[0], shard_ids=moved_shard_ids, is_scale_out=False)
+            liquid_output.liquid_start = time.time()
             self.update_worker_info_map(src, dst, moved_shard_ids)
             active_ranks = self.get_active_ranks()
             self.update_active_ranks(active_ranks)
@@ -209,7 +209,10 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
                 dst_block_id = num_gpu_blocks - (num_src_blocks - i)
                 src_to_dsts.append((src_block_id,dst_block_id))   
 
+            logger.info(f"Shrink to: #{num_gpu_blocks}, currently using blocks: #{len(src_to_dsts)}")
+            logger.info(f"Before move and shrink: {get_cuda_mem_info()}")
             self._run_workers("move_and_shrink_gpu_blocks", src_to_dsts=src_to_dsts, num_gpu_blocks=num_gpu_blocks, worker_ranks=[src, dst])
+            logger.info(f"After move and shrink: {get_cuda_mem_info()}")
             liquid_output.finished_move_and_shrink = time.time()
             self.cache_config.num_gpu_blocks = num_gpu_blocks
             self.data_transmission(src, dst, moved_shard_ids, liquid_output)
@@ -232,7 +235,9 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
                 src_to_dsts.append((src_block_id,dst_block_id))   
 
             logger.info(f"Shrink to: #{num_gpu_blocks}, currently using blocks: #{len(src_to_dsts)}")
+            logger.info(f"Before move and shrink: {get_cuda_mem_info()}")
             self._run_workers("move_and_shrink_gpu_blocks", src_to_dsts=src_to_dsts, num_gpu_blocks=num_gpu_blocks, worker_ranks=[0,1,2,3])
+            logger.info(f"After move and shrink: {get_cuda_mem_info()}")
             self.data_transmission(2,0,[1], liquid_output)
             self.data_transmission(3,1,[3], liquid_output)
             liquid_output.src_to_dsts = src_to_dsts
