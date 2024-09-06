@@ -154,10 +154,12 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             shard_ids = list(range(self.liquid_config.liquid_total_num_shards))
             moved_length = int(self.liquid_config.liquid_total_num_shards / 2)
             moved_shard_ids = shard_ids[moved_length:]
+            liquid_output = LiquidOutput(srcs=[0], dsts=[1], shard_ids=shard_ids, is_scale_out=True)
+            liquid_output.liquid_start = time.time()
             self.update_worker_info_map(src, dst, moved_shard_ids)
             active_ranks = self.get_active_ranks()
             self.update_active_ranks(active_ranks)
-            liquid_output = self.data_transmission(src, dst, moved_shard_ids)
+            self.data_transmission(src, dst, moved_shard_ids, liquid_output)
 
             num_new_gpu_blocks_list = self._run_workers("determine_num_new_gpu_blocks", only_active_workers=True)
             num_new_gpu_blocks = min(num_new_gpu_blocks_list)
@@ -165,35 +167,33 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             self.num_gpu_blocks_stack.append(self.cache_config.num_gpu_blocks)
 
             logger.info(f"After scale out, num_gpu_blocks: #{self.cache_config.num_gpu_blocks}")
-            start = time.time()
             self._run_workers("extend_gpu_blocks", self.cache_config.num_gpu_blocks, worker_ranks=[src, dst])
-            extend_gpu_latency = time.time() - start
-            logger.info(f"extending gpu blocks takes: {extend_gpu_latency:.2f}s, after extending gpu blocks: {get_cuda_mem_info()}")
+            liquid_output.finished_extending_gpu_blocks = time.time()
         
         elif liquid_type == LiquidType.LIQUID_2_4:
-            src = 0
-            dst = 3
+            liquid_output = LiquidOutput(srcs=[0,1], dsts=[2,3], shard_ids=[1,3], is_scale_out=True)
+            liquid_output.liquid_start = time.time()
             self.update_worker_info_map(0,2, [1])
             self.update_worker_info_map(1,3, [3])
             active_ranks = self.get_active_ranks()
             self.update_active_ranks(active_ranks)
-            liquid_output = self.data_transmission(0,2, [1])
-            liquid_output = self.data_transmission(1,3, [3])
+            self.data_transmission(0,2, [1], liquid_output=liquid_output)
+            self.data_transmission(1,3, [3], liquid_output=liquid_output)
             num_new_gpu_blocks_list = self._run_workers("determine_num_new_gpu_blocks", only_active_workers=True)
             num_new_gpu_blocks = min(num_new_gpu_blocks_list)
             self.cache_config.num_gpu_blocks += num_new_gpu_blocks
             self.num_gpu_blocks_stack.append(self.cache_config.num_gpu_blocks)
             logger.info(f"After scale out, num_gpu_blocks: #{self.cache_config.num_gpu_blocks}")
-            start = time.time()
             self._run_workers("extend_gpu_blocks", self.cache_config.num_gpu_blocks, worker_ranks=[0,1,2,3])
-            extend_gpu_latency = time.time() - start
-            logger.info(f"extending gpu blocks takes: {extend_gpu_latency:.2f}s, after extending gpu blocks: {get_cuda_mem_info()}")
+            liquid_output.finished_extending_gpu_blocks = time.time()
 
         # scale in
         elif liquid_type == LiquidType.LIQUID_2_1:
             src = 1
             dst = 0
             shard_ids = list(range(self.liquid_config.liquid_total_num_shards))
+            liquid_output = LiquidOutput(srcs=[1], dsts=[0], shard_ids=shard_ids, is_scale_out=False)
+            liquid_output.liquid_start = time.time()
             moved_length = int(self.liquid_config.liquid_total_num_shards / 2)
             moved_shard_ids = shard_ids[moved_length:]
             self.update_worker_info_map(src, dst, moved_shard_ids)
@@ -210,11 +210,14 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
                 src_to_dsts.append((src_block_id,dst_block_id))   
 
             self._run_workers("move_and_shrink_gpu_blocks", src_to_dsts=src_to_dsts, num_gpu_blocks=num_gpu_blocks, worker_ranks=[src, dst])
+            liquid_output.finished_move_and_shrink = time.time()
             self.cache_config.num_gpu_blocks = num_gpu_blocks
-            liquid_output = self.data_transmission(src, dst, moved_shard_ids)
+            self.data_transmission(src, dst, moved_shard_ids, liquid_output)
             liquid_output.src_to_dsts = src_to_dsts
 
         elif liquid_type == LiquidType.LIQUID_4_2:
+            liquid_output = LiquidOutput(srcs=[2,3], dsts=[0,1], shard_ids=[1,3], is_scale_out=False)
+            liquid_output.liquid_start = time.time()
             self.update_worker_info_map(2, 0, [1])
             self.update_worker_info_map(3, 1, [3])
             active_ranks = self.get_active_ranks()
@@ -230,8 +233,8 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
 
             logger.info(f"Shrink to: #{num_gpu_blocks}, currently using blocks: #{len(src_to_dsts)}")
             self._run_workers("move_and_shrink_gpu_blocks", src_to_dsts=src_to_dsts, num_gpu_blocks=num_gpu_blocks, worker_ranks=[0,1,2,3])
-            liquid_output = self.data_transmission(2,0,[1])
-            liquid_output = self.data_transmission(3,1,[3])
+            self.data_transmission(2,0,[1], liquid_output)
+            self.data_transmission(3,1,[3], liquid_output)
             liquid_output.src_to_dsts = src_to_dsts
 
 
@@ -240,9 +243,8 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         return liquid_output
 
 
-    def data_transmission(self, src: int, dst: int, shard_ids: List[int]) -> LiquidOutput:
-        liquid_output = LiquidOutput(shard_ids, src, dst)
-        liquid_output.liquid_start = time.time()
+    def data_transmission(self, src: int, dst: int, shard_ids: List[int], liquid_output: LiquidOutput) -> None:
+        # liquid_output = LiquidOutput(shard_ids, src, dst)
         # check if the src is active
         # active_ranks = self.get_active_ranks()
         # assert src in active_ranks, f"liquid src: {src} is not active!"
@@ -276,7 +278,6 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         logger.info(f"After liquid kvc, {get_cuda_mem_info()}")
         self.rank_worker_info_map[dst].initialized = True
          
-        return liquid_output
 
     def update_active_ranks(self,active_ranks: List[int]):
         self.stop_remote_worker_execution_loop()

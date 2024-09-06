@@ -741,11 +741,9 @@ class LLMEngine:
 
     def _do_liquid(self, liquid_request: LiquidRequest) -> LiquidOutput:
         block_ids = self.scheduler.get_sorted_block_ids()
-        start = time.time()
         liquid_output = self.model_executor.do_liquid(liquid_request, block_ids)
-        do_liquid_latency = time.time() - start
-        print(f"do_liquid latency: {do_liquid_latency:.2f}s")
         self.scheduler.update_gpu_blocks(self.cache_config.num_gpu_blocks, liquid_output.src_to_dsts)
+        liquid_output.finished_update_blocks = time.time()
         return liquid_output
 
     def check_liquid_request_and_complete(self):
@@ -820,10 +818,7 @@ class LLMEngine:
         if liquid_request is not None:
             self.liquid_request_queue.put(liquid_request)
 
-        start = time.time()
         self.check_liquid_request_and_complete()
-        liquid_latency = time.time() - start
-        # print(f"liquid_latency: {liquid_latency:.2f}s")
         seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
         # for seq_group_metadata in seq_group_metadata_list:
         #     block_table = seq_group_metadata.block_tables[0]
