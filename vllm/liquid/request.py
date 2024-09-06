@@ -25,8 +25,9 @@ class LiquidRequest:
 @dataclass
 class LiquidOutput:
     shard_ids: List[int]
-    src: int
-    dst: int
+    srcs: List[int]
+    dsts: List[int]
+    is_scale_out: bool
 
     # when scale in, need to move blocks, below is the mapping of src block number to dst block number
     src_to_dsts: List[Tuple[int,int]] = field(default_factory=list)
@@ -36,21 +37,45 @@ class LiquidOutput:
 
     #timestamps:
     liquid_start: float = 0
+    finished_move_and_shrink = 0
     finished_update_workers: float = 0
     finished_liquid_model_weights: float= 0
     finished_init_mem: float = 0
     finished_liquid_kvc: float = 0
+    finished_extending_gpu_blocks: float = 0
+    finished_update_blocks: float = 0
+
 
     def __repr__(self) -> str:
-        repr = f"Completed! Move shard: {self.shard_ids} from {self.src} to {self.dst};"
+        repr = f"Completed! Move shard: {self.shard_ids} from {self.srcs} to {self.dsts};"
         if self.freed_memory_GB is not None and self.liquid_e2e_latency is not None:
             repr += f"e2e_latency: {self.liquid_e2e_latency:.2f} s; freed memory: {self.freed_memory_GB:.2f} GB"
 
-        e2e_latency = self.finished_liquid_kvc - self.liquid_start
-        update_worker_latency = self.finished_update_workers - self.liquid_start
+        
+        e2e_latency = self.finished_update_blocks - self.liquid_start
+        repr += f"liquid e2e latency: {e2e_latency:.2f}s, "
+        if not self.is_scale_out:
+            move_and_shrink_latency = self.finished_move_and_shrink - self.liquid_start     
+            repr += f"move and shrink latency: {move_and_shrink_latency:.2f}s, "
+            update_worker_latency = self.finished_update_workers - self.finished_move_and_shrink
+        else:
+            update_worker_latency = self.finished_update_workers - self.liquid_start
+        repr += f"update worker latency: {update_worker_latency:.2f}s, "
+
         liquid_model_weights_latency = self.finished_liquid_model_weights - self.finished_update_workers
+        repr += f"liquid model weights latency: {liquid_model_weights_latency:.2f}s, "
         init_mem_latency = self.finished_init_mem - self.finished_liquid_model_weights
+        repr += f"init mem latency: {init_mem_latency:.2f}s, "
         liquid_kvc_latency = self.finished_liquid_kvc - self.finished_init_mem
-        repr += f"liquid e2e latency: {e2e_latency:.2f}s, update worker latency: {update_worker_latency:.2f}s, liquid model weights latency: {liquid_model_weights_latency:.2f}s, init mem latency: {init_mem_latency:.2f}s, liquid kvc latency: {liquid_kvc_latency:.2f}s;"
+        repr += f"liquid kvc latency: {liquid_kvc_latency:.2f}s, "
+
+        if self.is_scale_out:
+            extending_gpu_blocks_latency = self.finished_extending_gpu_blocks - self.finished_liquid_kvc
+            repr += f"extending gpu blocks latency: {extending_gpu_blocks_latency:.2f}s, "
+            update_blocks_latency = self.finished_update_blocks - self.finished_extending_gpu_blocks
+        else:
+            update_blocks_latency = self.finished_update_blocks - self.finished_liquid_kvc
+        repr += f"update blocks latency: {update_blocks_latency:.2f}s;"
+
 
         return repr
