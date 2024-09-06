@@ -9,9 +9,8 @@ from vllm.logger import init_logger
 from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, is_pin_memory_available
 from vllm.liquid.sharded_tensor import ShardedTensor
 from vllm.liquid.utils import send_dict, receive_dict
-from vllm.distributed.communication_op import get_liquid_communicator, get_device_world_group,get_tensor_model_parallel_group, get_tensor_model_parallel_cpu_group
+from vllm.distributed.communication_op import get_liquid_communicator, get_device_world_group,get_tensor_model_parallel_group, get_tensor_model_parallel_cpu_group, get_tensor_model_parallel_rank
 import time
-import gc
 
 logger = init_logger(__name__)
 
@@ -80,6 +79,7 @@ class CacheEngine:
             num_blocks, self.block_size, self.num_kv_heads, self.head_size)
         pin_memory = is_pin_memory_available() if device == "cpu" else False
         kv_cache: List[torch.Tensor] = []
+        # torch.cuda.memory._record_memory_history()
         for _ in range(self.num_layers):
             # null block in CpuGpuBlockAllocator requires at least that
             # block to be zeroed-out.
@@ -96,16 +96,29 @@ class CacheEngine:
                             pin_memory=pin_memory,
                             device=device)
             kv_cache.append(cache)
+        # torch.cuda.memory._dump_snapshot(f"./torch_mem_dump_{get_tensor_model_parallel_rank()}_{device}.pickle")
+        # torch.cuda.memory._record_memory_history(enabled=None)
         return kv_cache
 
     def extend_gpu_blocks(self, num_gpu_blocks: int):
         assert num_gpu_blocks > self.num_gpu_blocks
         kv_cache_shape = self.attn_backend.get_kv_cache_shape(num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size)
+        latencys = []
+        # torch.cuda.memory._record_memory_history()
+        # first delete all original tensor
+
         for i in range(self.num_layers):
-            new_cache = torch.empty(kv_cache_shape, dtype=self.dtype, pin_memory=False, device="cuda")
+            start = time.time()
+            new_cache = torch.empty(kv_cache_shape, dtype=self.dtype, device="cuda")
             original_num_blocks = self.gpu_cache[i].size(1)
             new_cache[:,:original_num_blocks, ...].copy_(self.gpu_cache[i])
             self.gpu_cache[i].data = new_cache
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            latency = time.time() - start
+            latencys.append(latency)
+        # torch.cuda.memory._dump_snapshot(f"./extend_gpu_memory_{get_tensor_model_parallel_rank()}.pickle")
+        # torch.cuda.memory._record_memory_history(enabled=None)
             
 
 

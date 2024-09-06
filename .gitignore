@@ -189,3 +189,4 @@ hip_compat.h
 *.json
 models/*
 LLMLoadgen*
+*.pickle
