@@ -5,8 +5,10 @@ import subprocess
 from vllm import LLM, SamplingParams, RequestOutput
 from typing import List, Dict, Tuple
 import json
+import traceback
 
 model_name = "facebook/opt-6.7b"
+output_file_name = "./output.txt"
 class LiquidServer:
     def __init__(self) -> None:
         self.fastapi_app = FastAPI()
@@ -15,12 +17,17 @@ class LiquidServer:
             enforce_eager=True,
             # load_format="auto",
             # tensor_parallel_size=2,
-            liquid_gpu_range = [0,1,2,3],
+            liquid_gpu_range = [0,1],
             liquid_gpu_space = 32,
             liquid_driver_gpu_id = 0, 
-            liquid_total_num_shards = 4,
+            liquid_total_num_shards = 2,
             # gpu_memory_utilization=0.7,
         )
+        with open(output_file_name, "w"):
+            pass
+
+        self.f = open(output_file_name, "a")
+        self.llm.llm_engine.request_output_handler = self.f 
         @self.fastapi_app.post("/v1/completions")
         async def enqueue_request(r: HttpRequestBody) -> None:
             print(f"{r.request_id} received!")
@@ -56,8 +63,9 @@ class LiquidServer:
                 '-max_drift', '100',
                 '-model_name', f'{model_name}'
             ]
-        working_dir = '/home/lrq/baseline/LLMLoadgen/release'
-        loadgen_process = subprocess.Popen(command, cwd=working_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        working_dir = '/home/lrq619/proj/vllm/LLMLoadgen/release'
+        # loadgen_process = subprocess.Popen(command, cwd=working_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        loadgen_process = subprocess.Popen(command, cwd=working_dir)
         loadgen_running = True
         request_outputs: List[RequestOutput] = []
         print("Loadgen started!")
@@ -66,12 +74,13 @@ class LiquidServer:
                 self.llm._run_engine(use_tqdm=False)
                 while self.llm.llm_engine.request_output_queue.qsize() != 0:
                     request_output = self.llm.llm_engine.request_output_queue.get()
-                    print(f"request: {request_output.request_id} finished!")
+                    # print(f"request: {request_output.request_id} finished!")
                     request_outputs.append(request_output)
 
                 loadgen_running = (loadgen_process.poll() is None)
         except Exception as e:
-            print(f"Error: {e}")
+            stack_trace = traceback.format_exc()
+            print(f"Error: {e}, stack trace: {stack_trace}")
         finally:
             print(f"All requests have been processed!")
 
@@ -110,6 +119,7 @@ class LiquidServer:
             with open('liquid_results.json', 'w') as json_file:
                 json.dump(data, json_file, indent=4)  # indent=4 for pretty printing
         
+        self.f.close()
         del self.llm
         self.http_server.stop()
 

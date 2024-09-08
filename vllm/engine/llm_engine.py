@@ -251,6 +251,8 @@ class LLMEngine:
         if not self.model_config.embedding_mode:
             self._initialize_kv_caches()
 
+        self.request_output_handler = None
+
         # If usage stat is enabled, collect relevant info.
         if is_usage_stats_enabled():
             from vllm.model_executor.model_loader import (
@@ -734,6 +736,20 @@ class LLMEngine:
         for request_output in request_outputs:
             if request_output.finished:
                 self.request_output_queue.put(request_output)
+                if self.request_output_handler:
+                    output_str = f"global_id: {request_output.request_id}; "
+                    metrics = request_output.metrics
+                    e2e_latency = metrics.finished_time - metrics.arrival_time
+                    queueing_latency = metrics.time_in_queue if metrics.time_in_queue else 0
+                    serving_latency = e2e_latency - queueing_latency
+                    if metrics is not None:
+                        output_str += f"arrival_time: {metrics.arrival_time}; "
+                        output_str += f"e2e_latency: {e2e_latency}; "
+                        output_str += f"queueing_latency: {queueing_latency}; "
+                        output_str += f"serving_latency: {serving_latency}; "
+                    output_str += '\n'
+                    self.request_output_handler.write(output_str)
+                    self.request_output_handler.flush()
         return request_outputs
 
     def do_liquid(self, liquid_request):
