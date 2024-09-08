@@ -13,6 +13,7 @@ from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.sequence import (Sequence, SequenceData, SequenceGroup,
                            SequenceGroupMetadata, SequenceStatus)
+from threading import Lock
 
 logger = init_logger(__name__)
 
@@ -307,6 +308,7 @@ class Scheduler:
                                        if self.enable_artificial_preemption
                                        else 0)
         self.num_cumulative_preemption: int = 0
+        self.waiting_lock = Lock()
 
     @property
     def lora_enabled(self) -> bool:
@@ -319,7 +321,8 @@ class Scheduler:
 
     def add_seq_group(self, seq_group: SequenceGroup) -> None:
         # Add sequence groups to the waiting queue.
-        self.waiting.append(seq_group)
+        with self.waiting_lock:
+            self.waiting.append(seq_group)
 
     def abort_seq_group(self, request_id: Union[str, Iterable[str]]) -> None:
         """Aborts a sequence group with the given ID.
@@ -337,32 +340,35 @@ class Scheduler:
         if isinstance(request_id, str):
             request_id = (request_id, )
         request_ids = set(request_id)
-        for state_queue in [self.waiting, self.running, self.swapped]:
-            aborted_groups: List[SequenceGroup] = []
-            for seq_group in state_queue:
-                if not request_ids:
-                    # Using 'break' here may add two extra iterations,
-                    # but is acceptable to reduce complexity.
-                    break
-                if seq_group.request_id in request_ids:
-                    # Appending aborted group into pending list.
-                    aborted_groups.append(seq_group)
-                    request_ids.remove(seq_group.request_id)
-            for aborted_group in aborted_groups:
-                # Remove the sequence group from the state queue.
-                state_queue.remove(aborted_group)
-                for seq in aborted_group.get_seqs():
-                    if seq.is_finished():
-                        continue
-                    seq.status = SequenceStatus.FINISHED_ABORTED
-                    self.free_seq(seq)
+        with self.waiting_lock:
+            for state_queue in [self.waiting, self.running, self.swapped]:
+                aborted_groups: List[SequenceGroup] = []
+                for seq_group in state_queue:
+                    if not request_ids:
+                        # Using 'break' here may add two extra iterations,
+                        # but is acceptable to reduce complexity.
+                        break
+                    if seq_group.request_id in request_ids:
+                        # Appending aborted group into pending list.
+                        aborted_groups.append(seq_group)
+                        request_ids.remove(seq_group.request_id)
+                for aborted_group in aborted_groups:
+                    # Remove the sequence group from the state queue.
+                    state_queue.remove(aborted_group)
+                    for seq in aborted_group.get_seqs():
+                        if seq.is_finished():
+                            continue
+                        seq.status = SequenceStatus.FINISHED_ABORTED
+                        self.free_seq(seq)
 
     def has_unfinished_seqs(self) -> bool:
-        return len(self.waiting) != 0 or len(self.running) != 0 or len(
-            self.swapped) != 0
+        with self.waiting_lock:
+            return len(self.waiting) != 0 or len(self.running) != 0 or len(
+                self.swapped) != 0
 
     def get_num_unfinished_seq_groups(self) -> int:
-        return len(self.waiting) + len(self.running) + len(self.swapped)
+        with self.waiting_lock:
+            return len(self.waiting) + len(self.running) + len(self.swapped)
 
     def _schedule_running(
         self,
@@ -753,8 +759,9 @@ class Scheduler:
             seq_group.lora_int_id for seq_group in self.running
             if seq_group.lora_int_id > 0) if self.lora_enabled else None
 
-        remaining_waiting, prefills = (self.waiting,
-                                       SchedulerPrefillOutputs.create_empty())
+        with self.waiting_lock:
+            remaining_waiting, prefills = (self.waiting,
+                                        SchedulerPrefillOutputs.create_empty())
         remaining_running, running_scheduled = (
             self.running, SchedulerRunningOutputs.create_empty())
         remaining_swapped, swapped_in = (
@@ -762,8 +769,9 @@ class Scheduler:
 
         # If any requests are swapped, prioritized swapped requests.
         if not self.swapped:
-            remaining_waiting, prefills = self._schedule_prefills(
-                self.waiting, budget, curr_loras, enable_chunking=False)
+            with self.waiting_lock:
+                remaining_waiting, prefills = self._schedule_prefills(
+                    self.waiting, budget, curr_loras, enable_chunking=False)
 
         fcfs_policy = PolicyFactory.get_policy(policy_name="fcfs")
         # Don't schedule decodes if prefills are scheduled.
@@ -789,8 +797,9 @@ class Scheduler:
         assert budget.num_curr_seqs <= self.scheduler_config.max_num_seqs
 
         # Update waiting requests.
-        self.waiting = remaining_waiting
-        self.waiting.extendleft(running_scheduled.preempted)
+        with self.waiting_lock:
+            self.waiting = remaining_waiting
+            self.waiting.extendleft(running_scheduled.preempted)
         # Update new running requests.
         self.running = remaining_running
         self.running.extend([s.seq_group for s in prefills.seq_groups])
@@ -869,16 +878,18 @@ class Scheduler:
                 self.swapped, budget, curr_loras, fcfs_policy)
 
         # Schedule new prefills.
-        remaining_waiting, prefills = self._schedule_prefills(
-            self.waiting, budget, curr_loras, enable_chunking=True)
+        with self.waiting_lock:
+            remaining_waiting, prefills = self._schedule_prefills(
+                self.waiting, budget, curr_loras, enable_chunking=True)
 
         assert (budget.num_batched_tokens <=
                 self.scheduler_config.max_num_batched_tokens)
         assert budget.num_curr_seqs <= self.scheduler_config.max_num_seqs
 
         # Update waiting requests.
-        self.waiting = remaining_waiting
-        self.waiting.extendleft(running_scheduled.preempted)
+        with self.waiting_lock:
+            self.waiting = remaining_waiting
+            self.waiting.extendleft(running_scheduled.preempted)
         # Update new running requests.
         self.running = remaining_running
         self.running.extend([s.seq_group for s in prefills.seq_groups])
@@ -1153,12 +1164,13 @@ class Scheduler:
         self.prev_time, self.prev_prompt = now, False
         # Delay scheduling prompts to let waiting queue fill up
         if self.scheduler_config.delay_factor > 0 and self.waiting:
-            earliest_arrival_time = min(
-                [e.metrics.arrival_time for e in self.waiting])
-            passed_delay = (
-                (now - earliest_arrival_time) >
-                (self.scheduler_config.delay_factor * self.last_prompt_latency)
-                or not self.running)
+            with self.waiting_lock:
+                earliest_arrival_time = min(
+                    [e.metrics.arrival_time for e in self.waiting])
+                passed_delay = (
+                    (now - earliest_arrival_time) >
+                    (self.scheduler_config.delay_factor * self.last_prompt_latency)
+                    or not self.running)
         else:
             passed_delay = True
         return passed_delay
