@@ -485,7 +485,6 @@ class Worker(WorkerBase):
             free_mem, _ = torch.cuda.mem_get_info()
             freed_mem = free_mem - last_free_mem
             last_free_mem = free_mem
-            logger.info(f"After deleting kv_cache for layer {i}, we have {freed_mem/(1024**2):.1f}MB more space on GPU0")
 
     def get_shards_weights(self, shard_ids: List[int]):
         return self.model_runner.model.get_shards_weights(shard_ids)

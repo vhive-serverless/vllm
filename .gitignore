@@ -190,3 +190,4 @@ hip_compat.h
 models/*
 LLMLoadgen*
 *.pickle
+*.txt

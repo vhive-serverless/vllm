@@ -196,7 +196,6 @@ class CacheEngine:
         torch.cuda.empty_cache()
         free_mem,_ = torch.cuda.mem_get_info()
         latest_free_mem = free_mem
-        logger.info(f"After deleting layer's shard, free mem: {free_mem/(1024**2):.2f}MB")
         for i, cache in enumerate(self.gpu_cache):
             cache.delete_shards(start_shard_id, end_shard_id) 
             torch.cuda.empty_cache()
