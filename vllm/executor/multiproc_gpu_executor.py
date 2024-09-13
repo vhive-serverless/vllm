@@ -238,6 +238,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             logger.info(f"Before move and shrink: {get_cuda_mem_info()}")
             self._run_workers("move_and_shrink_gpu_blocks", src_to_dsts=src_to_dsts, num_gpu_blocks=num_gpu_blocks, worker_ranks=[0,1,2,3])
             logger.info(f"After move and shrink: {get_cuda_mem_info()}")
+            self.cache_config.num_gpu_blocks = num_gpu_blocks
             self.data_transmission(2,0,[1], liquid_output)
             self.data_transmission(3,1,[3], liquid_output)
             liquid_output.src_to_dsts = src_to_dsts

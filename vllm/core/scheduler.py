@@ -1216,9 +1216,9 @@ class Scheduler:
 
 
     def update_gpu_blocks(self, num_gpu_blocks: int, src_to_dsts: List[Tuple[int,int]]):
-        free_blocks_end = 0
-        if src_to_dsts != []:
-            free_blocks_end = num_gpu_blocks - len(src_to_dsts)
+        # free_blocks_end = 0
+        # if src_to_dsts != []:
+        free_blocks_end = num_gpu_blocks - len(src_to_dsts)
         self.block_manager.update_gpu_blocks(num_gpu_blocks, free_blocks_end)
         if src_to_dsts == []: return
 

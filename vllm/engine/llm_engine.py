@@ -772,7 +772,8 @@ class LLMEngine:
                 logger.info(f"Finished liquid for {self.liquid_count} times, output: {liquid_output}, current mem info on GPU0: {get_cuda_mem_info()}")
                 self.liquid_count += 1
             except Exception as e:
-                logger.error(f"Failed to perform liquid! error: {e}")
+                logger.error(f"Failed to perform liquid! error: {e}, memory status: {get_cuda_mem_info()}")
+                raise Exception(e)
                 # torch.cuda.memory._record_memory_history(enabled=None)
                 # torch.cuda.memory._dump_snapshot(f"./torch_mem_dump.pickle")
                 # raise Exception(e)
@@ -830,6 +831,7 @@ class LLMEngine:
         """
         # self.model_executor.delete_kv_cache()
         cache_usage = self.get_latest_metrics().gpu_cache_usage
+        # liquid_request = None
         liquid_request = self.auto_scaler.step(cache_usage)
         if liquid_request is not None:
             self.liquid_request_queue.put(liquid_request)

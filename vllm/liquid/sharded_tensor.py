@@ -83,7 +83,11 @@ class ShardedTensor(Tensor):
         start_index = index * self.shard_size
         before_shard = tensor.narrow(self.shard_dim, 0, start_index)
         after_shard = tensor.narrow(self.shard_dim, start_index + self.shard_size*(end_shard_id - start_shard_id), tensor.size(self.shard_dim) - start_index - self.shard_size*(end_shard_id - start_shard_id))
-        new_data = torch.cat([before_shard, after_shard], dim=self.shard_dim)
+        if before_shard.size(self.shard_dim) == after_shard.size(self.shard_dim) == 0:
+            new_data = torch.empty(0, device=tensor.device)
+        else:
+            new_data = torch.cat([before_shard, after_shard], dim=self.shard_dim)
+        
         return new_data
 
     def delete_shard(self, shard_id: int) -> None:

@@ -6,6 +6,7 @@ from vllm import LLM, SamplingParams, RequestOutput
 from typing import List, Dict, Tuple
 import json
 import traceback
+from vllm.liquid.request import LiquidRequest, LiquidType
 
 model_name = "facebook/opt-6.7b"
 output_file_name = "./output.txt"
@@ -17,10 +18,10 @@ class LiquidServer:
             enforce_eager=True,
             # load_format="auto",
             # tensor_parallel_size=2,
-            liquid_gpu_range = [0,1],
+            liquid_gpu_range = [0,1,2,3],
             liquid_gpu_space = 32,
             liquid_driver_gpu_id = 0, 
-            liquid_total_num_shards = 2,
+            liquid_total_num_shards = 4,
             # gpu_memory_utilization=0.7,
         )
         with open(output_file_name, "w"):
@@ -40,6 +41,7 @@ class LiquidServer:
                 global_id=r.global_request_id,
                 params=sampling_params
             )
+
         self.http_server = UvicornServer(
             uvicorn.Config(
                 app=self.fastapi_app,
@@ -54,17 +56,15 @@ class LiquidServer:
 
         command = [
                 './LLMLoadgen',
-                '-pattern', 'azure-conv-70-5',
+                '-pattern', 'azure-conv-50-5',
                 '-dataset', 'azure-conv',
                 '-dst', 'liquid',
                 '-ip', 'localhost',
                 '-port', '8000',
-                # '-limit', '100',
                 '-max_drift', '100',
                 '-model_name', f'{model_name}'
             ]
-        working_dir = '/home/lrq619/proj/vllm/LLMLoadgen/release'
-        # loadgen_process = subprocess.Popen(command, cwd=working_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        working_dir = '/home/lrq/baseline/LLMLoadgen/release'
         loadgen_process = subprocess.Popen(command, cwd=working_dir)
         loadgen_running = True
         request_outputs: List[RequestOutput] = []
@@ -82,7 +82,8 @@ class LiquidServer:
             stack_trace = traceback.format_exc()
             print(f"Error: {e}, stack trace: {stack_trace}")
         finally:
-            print(f"All requests have been processed!")
+            loadgen_process.terminate()
+            print(f"loadgen process terminated!")
 
             # store all the results
             timestamps = self.llm.llm_engine.auto_scaler.timestamp_records
