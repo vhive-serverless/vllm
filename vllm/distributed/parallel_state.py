@@ -57,7 +57,7 @@ import time
 
 
 class ActiveGroupManager:
-    def __init__(self, rank:int) -> None:
+    def __init__(self, rank:int, world_size: int) -> None:
         self._TP_DEVICE_GROUP: Optional[ProcessGroup] = None
         self._TP_CPU_GROUP: Optional[ProcessGroup] = None
         self._TP_PYNCCL_COMMUNICATOR = None
@@ -67,14 +67,35 @@ class ActiveGroupManager:
         self.active_ranks = [0]
         self.rank = rank
 
+        self.gpu_groups = {}
+        self.cpu_groups = {}
+        
+        # self.gpu_groups[1] = torch.distributed.split_group(split_ranks=[[0]])
+        # self.gpu_groups[2] = torch.distributed.split_group(split_ranks=[[0,1]])
+        # self.gpu_groups[4] = torch.distributed.split_group(split_ranks=[[0,1,2,3]])
+        torch.cuda.set_device(torch.device(f"cuda:{rank}"))
+        self.gpu_groups[1] = torch.distributed.new_group(ranks=[0], backend=self.backend)
+        self.cpu_groups[1] = torch.distributed.new_group(ranks=[0], backend="gloo")
+
+        self.gpu_groups[2] = torch.distributed.new_group(ranks=[0,1], backend=self.backend)
+        self.cpu_groups[2] = torch.distributed.new_group(ranks=[0,1], backend="gloo")
+        if world_size > 2:
+            self.gpu_groups[4] = torch.distributed.new_group(ranks=[0,1,2,3], backend=self.backend)
+            self.cpu_groups[4] = torch.distributed.new_group(ranks=[0,1,2,3], backend="gloo")
+        
+
     def update_active_ranks(self, active_ranks: List[int]):
         # update the active ranks and create groups
         self.active_ranks = active_ranks
-        self.destroy_model_parallel()
+        tp_level = len(active_ranks)
+        # self.destroy_model_parallel()
 
-        # whether rank is active, must execute this
-        group = torch.distributed.new_group(ranks=active_ranks, backend=self.backend)
-        cpu_group = torch.distributed.new_group(ranks=active_ranks, backend="gloo")
+        # # # whether rank is active, must execute this
+        # group = torch.distributed.new_group(ranks=active_ranks, backend=self.backend)
+        # print(f"finished creating group for rank: {self.rank}")
+        group = self.gpu_groups[tp_level] 
+        cpu_group = self.cpu_groups[tp_level]
+        # cpu_group = torch.distributed.new_group(ranks=active_ranks, backend="gloo")
         # only active ranks need to execute following steps:
         if self.rank in self.active_ranks:
             self._TP_DEVICE_GROUP = group
@@ -104,7 +125,9 @@ class ActiveGroupManager:
         if self._TP_CPU_GROUP is not None:
             torch.distributed.destroy_process_group(self._TP_CPU_GROUP)
         self._TP_CPU_GROUP = None
+        del self._TP_PYNCCL_COMMUNICATOR
         self._TP_PYNCCL_COMMUNICATOR = None
+        del self._TP_CA_COMMUNICATOR
         self._TP_CA_COMMUNICATOR = None
 
 ACTIVE_GROUP_MANAGER: Optional[ActiveGroupManager] = None
@@ -168,11 +191,13 @@ def init_distributed_environment(
             "distributed_init_method must be provided when initializing "
             "distributed environment")
         # this backend is used for WORLD
+        torch.cuda.set_device(torch.device(f"cuda:{rank}"))
         torch.distributed.init_process_group(
             backend=backend,
             init_method=distributed_init_method,
             world_size=world_size,
-            rank=rank)
+            rank=rank,
+            )
         global _DEVICE_WORLD_GROUP, _CPU_WORLD_GROUP
         _DEVICE_WORLD_GROUP = torch.distributed.group.WORLD
         ranks = list(range(torch.distributed.get_world_size()))
@@ -200,7 +225,7 @@ def init_distributed_environment(
         del data
         global ACTIVE_GROUP_MANAGER
         if ACTIVE_GROUP_MANAGER is None or ACTIVE_GROUP_MANAGER._TP_DEVICE_GROUP is None:
-            ACTIVE_GROUP_MANAGER = ActiveGroupManager(rank)
+            ACTIVE_GROUP_MANAGER = ActiveGroupManager(rank, world_size)
 
         global LIQUID_COMMUNICATOR, TCP_STORE_PORT
         LIQUID_COMMUNICATOR = LiquidCommunicator(

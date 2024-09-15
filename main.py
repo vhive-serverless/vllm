@@ -20,33 +20,25 @@ def main():
         liquid_gpu_space = 32,
         liquid_driver_gpu_id = 0, 
         liquid_total_num_shards = 4,
+        gpu_memory_utilization=0.8,
     )
-    sampling_params = SamplingParams(temperature=0, min_tokens=4, max_tokens=4)
+    sampling_params = SamplingParams(temperature=0, min_tokens=128, max_tokens=128)
     request_num = 1
     word = "what is LLM?" 
     prompt = word 
     inputs = [prompt for _ in range(request_num)]
 
-    liquid_request = LiquidRequest(LiquidType.LIQUID_1_2)
-    llm.do_liquid(liquid_request)
-    output = llm.generate(inputs, sampling_params=sampling_params)
-    print(f"output: {output[0].outputs[0].text}")
-    liquid_request = LiquidRequest(LiquidType.LIQUID_2_4)
-    llm.do_liquid(liquid_request)
-    # liquid_request = LiquidRequest(LiquidType.LIQUID_4_2)
-    # llm.do_liquid(liquid_request)
-    # liquid_request = LiquidRequest(LiquidType.LIQUID_2_1)
-    # llm.do_liquid(liquid_request)
+    for i in range(25):
+        liquid_request = LiquidRequest(LiquidType.LIQUID_1_2)
+        llm.do_liquid(liquid_request)
+        liquid_request = LiquidRequest(LiquidType.LIQUID_2_4)
+        llm.do_liquid(liquid_request)
+        liquid_request = LiquidRequest(LiquidType.LIQUID_4_2)
+        llm.do_liquid(liquid_request)
+        liquid_request = LiquidRequest(LiquidType.LIQUID_2_1)
+        llm.do_liquid(liquid_request)
 
 
-    output = llm.generate(inputs, sampling_params=sampling_params)
-    print(f"output: {output[0].outputs[0].text}")
-
-    
-    liquid_request = LiquidRequest(LiquidType.LIQUID_4_2)
-    llm.do_liquid(liquid_request)
-    # liquid_request = LiquidRequest(LiquidType.LIQUID_2_1)
-    # llm.do_liquid(liquid_request)
     output = llm.generate(inputs, sampling_params=sampling_params)
     print(f"output: {output[0].outputs[0].text}")
 
