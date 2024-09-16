@@ -71,11 +71,11 @@ def _is_full_nvlink(device_ids: List[int]) -> bool:
     return True
 
 
-def _can_p2p(rank: int, world_size: int) -> bool:
+def _can_p2p(rank: int, world_size: int, group) -> bool:
     for i in range(world_size):
         if i == rank:
             continue
-        if not gpu_p2p_access_check(rank, i):
+        if not gpu_p2p_access_check(rank, i, group):
             return False
     return True
 
@@ -175,7 +175,7 @@ class CustomAllreduce:
         # test P2P capability, this checks software/cudaruntime support
         # this is expensive to compute at the first time
         # then we cache the result
-        if not _can_p2p(rank, world_size):
+        if not _can_p2p(rank, world_size, group):
             logger.warning(
                 "Custom allreduce is disabled because your platform lacks "
                 "GPU P2P capability or P2P test failed. To silence this "

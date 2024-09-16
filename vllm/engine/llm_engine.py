@@ -44,7 +44,7 @@ from vllm.utils import Counter
 from vllm.liquid.request import LiquidRequest, LiquidOutput, LiquidType
 from vllm.liquid.auto_scaler import AutoScaler
 from queue import Queue
-from vllm.liquid.utils import get_cuda_mem_info
+from vllm.liquid.utils import get_cuda_mem_info, get_gpu_processes_and_memory
 
 logger = init_logger(__name__)
 _LOCAL_LOGGING_INTERVAL_SEC = 5
@@ -769,10 +769,10 @@ class LLMEngine:
 
                 # torch.cuda.memory._record_memory_history(max_entries=100000)
                 liquid_output = self._do_liquid(liquid_request)
-                logger.info(f"Finished liquid for {self.liquid_count} times, output: {liquid_output}, current mem info on GPU0: {get_cuda_mem_info()}")
+                logger.info(f"Finished liquid for {self.liquid_count} times, output: {liquid_output}, current mem info on GPU0: {get_cuda_mem_info()}\nprocesses running on gpu-0: {get_gpu_processes_and_memory()}")
                 self.liquid_count += 1
             except Exception as e:
-                logger.error(f"Failed to perform liquid! error: {e}, memory status: {get_cuda_mem_info()}")
+                logger.error(f"Failed to perform liquid! error: {e}, memory status: {get_cuda_mem_info()}\nprocesses running on gpu-0: {get_gpu_processes_and_memory()}")
                 raise Exception(e)
                 # torch.cuda.memory._record_memory_history(enabled=None)
                 # torch.cuda.memory._dump_snapshot(f"./torch_mem_dump.pickle")

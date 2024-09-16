@@ -13,6 +13,7 @@ from torch.distributed import ProcessGroup
 import vllm.envs as envs
 from vllm.logger import init_logger
 from vllm.liquid.liquid_communicator import LiquidCommunicator
+from vllm.liquid.utils import get_gpu_processes_and_memory, get_cuda_mem_info
 
 logger = init_logger(__name__)
 
@@ -69,26 +70,48 @@ class ActiveGroupManager:
 
         self.gpu_groups = {}
         self.cpu_groups = {}
+        self.tp_pynccl_comms = {}
+        self.tp_ca_comms = {}
         
         # self.gpu_groups[1] = torch.distributed.split_group(split_ranks=[[0]])
         # self.gpu_groups[2] = torch.distributed.split_group(split_ranks=[[0,1]])
         # self.gpu_groups[4] = torch.distributed.split_group(split_ranks=[[0,1,2,3]])
         torch.cuda.set_device(torch.device(f"cuda:{rank}"))
-        self.gpu_groups[1] = torch.distributed.new_group(ranks=[0], backend=self.backend)
-        self.cpu_groups[1] = torch.distributed.new_group(ranks=[0], backend="gloo")
+        self.init_group_and_comms(1)
+        self.init_group_and_comms(2)
 
-        self.gpu_groups[2] = torch.distributed.new_group(ranks=[0,1], backend=self.backend)
-        self.cpu_groups[2] = torch.distributed.new_group(ranks=[0,1], backend="gloo")
         if world_size > 2:
-            self.gpu_groups[4] = torch.distributed.new_group(ranks=[0,1,2,3], backend=self.backend)
-            self.cpu_groups[4] = torch.distributed.new_group(ranks=[0,1,2,3], backend="gloo")
+            self.init_group_and_comms(4)
+
+    def init_group_and_comms(self, tp_level: int):
+        torch.cuda.set_device(torch.device(f"cuda:{self.rank}"))
+        ranks = list(range(tp_level))
+        group = torch.distributed.new_group(ranks=ranks, backend=self.backend)
+        cpu_group = torch.distributed.new_group(ranks=ranks, backend="gloo")
+        self.gpu_groups[tp_level] = group
+        self.cpu_groups[tp_level] = cpu_group
+        if self.rank in ranks:
+            from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
+            self.tp_pynccl_comms[tp_level] = PyNcclCommunicator(
+                group=cpu_group,
+                device=_LOCAL_RANK,
+            )
+
+            # Initialize a custom fast all-reduce implementation.
+            if _ENABLE_CUSTOM_ALL_REDUCE:
+                from vllm.distributed.device_communicators.custom_all_reduce import (
+                    CustomAllreduce)
+                self.tp_ca_comms[tp_level] = CustomAllreduce(
+                    group=cpu_group,
+                    device=_LOCAL_RANK,
+                )
         
 
     def update_active_ranks(self, active_ranks: List[int]):
         # update the active ranks and create groups
         self.active_ranks = active_ranks
         tp_level = len(active_ranks)
-        # self.destroy_model_parallel()
+        self.destroy_model_parallel()
 
         # # # whether rank is active, must execute this
         # group = torch.distributed.new_group(ranks=active_ranks, backend=self.backend)
@@ -101,33 +124,21 @@ class ActiveGroupManager:
             self._TP_DEVICE_GROUP = group
             self._TP_CPU_GROUP = cpu_group 
 
-            from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
-            self._TP_PYNCCL_COMMUNICATOR = PyNcclCommunicator(
-                group=self._TP_CPU_GROUP,
-                device=_LOCAL_RANK,
-            )
-
-            # Initialize a custom fast all-reduce implementation.
+            self._TP_PYNCCL_COMMUNICATOR = self.tp_pynccl_comms[tp_level]
             if _ENABLE_CUSTOM_ALL_REDUCE:
-                from vllm.distributed.device_communicators.custom_all_reduce import (
-                    CustomAllreduce)
-                self._TP_CA_COMMUNICATOR = CustomAllreduce(
-                    group=self._TP_CPU_GROUP,
-                    device=_LOCAL_RANK,
-                )
+                self._TP_CA_COMMUNICATOR = self.tp_ca_comms.get(tp_level, None)
+                # self._TP_CA_COMMUNICATOR = self.tp_ca_comms[tp_level]
 
             
 
     def destroy_model_parallel(self):
-        if self._TP_DEVICE_GROUP is not None:
-            torch.distributed.destroy_process_group(self._TP_DEVICE_GROUP)
+        # if self._TP_DEVICE_GROUP is not None:
+        #     torch.distributed.destroy_process_group(self._TP_DEVICE_GROUP)
         self._TP_DEVICE_GROUP = None
-        if self._TP_CPU_GROUP is not None:
-            torch.distributed.destroy_process_group(self._TP_CPU_GROUP)
+        # if self._TP_CPU_GROUP is not None:
+            # torch.distributed.destroy_process_group(self._TP_CPU_GROUP)
         self._TP_CPU_GROUP = None
-        del self._TP_PYNCCL_COMMUNICATOR
         self._TP_PYNCCL_COMMUNICATOR = None
-        del self._TP_CA_COMMUNICATOR
         self._TP_CA_COMMUNICATOR = None
 
 ACTIVE_GROUP_MANAGER: Optional[ActiveGroupManager] = None

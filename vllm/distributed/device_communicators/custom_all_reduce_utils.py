@@ -142,7 +142,7 @@ def can_actually_p2p(i, j):
 _gpu_p2p_access_cache: Optional[Dict[str, bool]] = None
 
 
-def gpu_p2p_access_check(i: int, j: int) -> bool:
+def gpu_p2p_access_check(i: int, j: int, group=None) -> bool:
     """Check if GPU i can access GPU j."""
 
     # if the cache variable is already calculated,
@@ -175,8 +175,8 @@ def gpu_p2p_access_check(i: int, j: int) -> bool:
             json.dump(cache, f, indent=4)
     if is_distributed:
         # cpu_world_group = get_cpu_world_group()
-        cpu_world_group = get_tensor_model_parallel_cpu_group()
-        dist.barrier(cpu_world_group)
+        cpu_group = group if group else get_cpu_world_group()
+        dist.barrier(cpu_group)
     logger.info("reading GPU P2P access cache from %s", path)
     with open(path, "r") as f:
         cache = json.load(f)

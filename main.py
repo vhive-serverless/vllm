@@ -20,7 +20,7 @@ def main():
         liquid_gpu_space = 32,
         liquid_driver_gpu_id = 0, 
         liquid_total_num_shards = 4,
-        gpu_memory_utilization=0.8,
+        # gpu_memory_utilization=0.8,
     )
     sampling_params = SamplingParams(temperature=0, min_tokens=128, max_tokens=128)
     request_num = 1
