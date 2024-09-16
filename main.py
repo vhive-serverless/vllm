@@ -37,10 +37,12 @@ def main():
         llm.do_liquid(liquid_request)
         liquid_request = LiquidRequest(LiquidType.LIQUID_2_1)
         llm.do_liquid(liquid_request)
+    
+    print("liquid done")
 
 
     output = llm.generate(inputs, sampling_params=sampling_params)
-    print(f"output: {output[0].outputs[0].text}")
+    # print(f"output: {output[0].outputs[0].text}")
 
 
 

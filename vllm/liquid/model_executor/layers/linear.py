@@ -737,3 +737,173 @@ class RowParallelLinear(LinearBase):
         s += f", tp_size={self.tp_size}"
         s += f", reduce_results={self.reduce_results}"
         return s
+
+
+class MergedColumnParallelLinear(ColumnParallelLinear):
+    """Packed linear layers with column parallelism.
+
+    Similar to ColumnParallelLinear, but the weight matrix is concatenated
+    along the output dimension. When the weight matrix is loaded, the
+    different partitions are sharded separately.
+
+    Args:
+        input_size: input dimension of the linear layer.
+        output_sizes: list of output dimensions of the linear layer.
+        bias: If true, add bias.
+        gather_output: If true, call all-gather on output and make the output
+                       available to all GPUs, otherwise, every GPU will have
+                       its own output.
+        skip_bias_add: This was added to enable performance optimizations where
+                       bias can be fused with other element-wise operations. we
+                       skip adding bias but instead return it.
+        params_dtype: Data type for the parameters.
+        quant_config: Quantization configure.
+    """
+
+    def __init__(self,
+                 input_size: int,
+                 output_sizes: List[int],
+                 bias: bool = True,
+                 gather_output: bool = False,
+                 skip_bias_add: bool = False,
+                 params_dtype: Optional[torch.dtype] = None,
+                 quant_config: Optional[QuantizationConfig] = None,
+                 shard_ids: List[int] = [0],
+                 total_num_shards: int = 1,):
+        self.output_sizes = output_sizes
+        # tp_size = get_tensor_model_parallel_world_size()
+        # assert all(output_size % tp_size == 0 for output_size in output_sizes)
+        super().__init__(input_size=input_size,
+                         output_size=sum(output_sizes),
+                         bias=bias,
+                         gather_output=gather_output,
+                         skip_bias_add=skip_bias_add,
+                         params_dtype=params_dtype,
+                         quant_config=quant_config,
+                         shard_ids=shard_ids,
+                         total_num_shards=total_num_shards,)
+
+    def weight_loader(self,
+                      param: Parameter,
+                      loaded_weight: torch.Tensor,
+                      loaded_shard_id: Optional[int] = None):
+
+        param_data = param.data
+        output_dim = getattr(param, "output_dim", None)
+        # Special case for AQLM codebooks.
+        is_metadata = getattr(param, "is_metadata", False)
+
+        param_shard_splitter = getattr(param, "shard_splitter", None)
+
+        if output_dim is not None and param_shard_splitter is not None:
+            raise NotImplementedError(
+                "We do not currently support output_dim != None and "
+                "shard_splitter != None for a parameter. Please open an issue."
+            )
+        # If a parameter has defined a shard_splitter to be used for
+        # the weight, it should be applied before the weight is
+        # loaded/copied to the parameter. The shard_splitter applies
+        # logic by using the loaded_shard_id to ensure that the loaded
+        # param is loaded to the correct location
+        # within the parameter defined by the linear method.
+        if loaded_shard_id is None and param_shard_splitter is not None:
+            raise NotImplementedError(
+                "We do not currently support loaded_shard_id == None and "
+                "shard_splitter != None for a parameter. Please open an issue."
+            )
+
+        # Special case for Fp8 scales.
+        fp8_scales_shard_indexer = getattr(param, "fp8_scales_shard_indexer",
+                                           None)
+
+        if loaded_shard_id is None:
+            # Loaded weight is already packed.
+            if output_dim is None:
+                assert param_data.shape == loaded_weight.shape
+                param_data.copy_(loaded_weight)
+                return
+            current_shard_offset = 0
+            shard_offsets = []
+            for i, output_size in enumerate(self.output_sizes):
+                shard_offsets.append((i, current_shard_offset, output_size))
+                current_shard_offset += output_size
+            packed_dim = getattr(param, "packed_dim", None)
+            for shard_id, shard_offset, shard_size in shard_offsets:
+                # Special case for Quantization.
+                # If quantized, we need to adjust the offset and size to account
+                # for the packing.
+                if packed_dim == output_dim:
+                    shard_size = shard_size // param.pack_factor
+                    shard_offset = shard_offset // param.pack_factor
+                    # Special case for Marlin.
+                    shard_size, shard_offset = adjust_marlin_shard(
+                        param, shard_size, shard_offset)
+
+                loaded_weight_shard = loaded_weight.narrow(
+                    output_dim, shard_offset, shard_size)
+                self.weight_loader(param, loaded_weight_shard, shard_id)
+            return
+
+        assert loaded_shard_id < len(self.output_sizes)
+        tp_rank = get_tensor_model_parallel_rank()
+        tp_size = get_tensor_model_parallel_world_size()
+        if output_dim is not None:
+            shard_offset = sum(self.output_sizes[:loaded_shard_id]) // tp_size
+            shard_size = self.output_sizes[loaded_shard_id] // tp_size
+            # Special case for quantization.
+            # If quantized, we need to adjust the offset and size to account
+            # for the packing.
+            packed_dim = getattr(param, "packed_dim", None)
+            if packed_dim == output_dim:
+                shard_size = shard_size // param.pack_factor
+                shard_offset = shard_offset // param.pack_factor
+                # Special case for Marlin.
+                shard_size, shard_offset = adjust_marlin_shard(
+                    param, shard_size, shard_offset)
+
+            use_bitsandbytes = getattr(param, "use_bitsandbytes", False)
+            if use_bitsandbytes:
+                shard_size = loaded_weight.shape[output_dim]
+                shard_offset = loaded_weight.shape[output_dim] * \
+                    loaded_shard_id
+
+            param_data = param_data.narrow(output_dim, shard_offset,
+                                           shard_size)
+            start_idx = tp_rank * shard_size
+            loaded_weight = loaded_weight.narrow(output_dim, start_idx,
+                                                 shard_size)
+        # Special case for AQLM codebooks.
+        elif is_metadata:
+            # metadata indicates fixed size concatenated along dim 0
+            shard_size = loaded_weight.shape[0]
+            shard_offset = loaded_shard_id * shard_size
+            param_data = param_data.narrow(0, shard_offset, shard_size)
+
+        # If a param_shard_splitter is defined by the LinearMethod, use it.
+        elif param_shard_splitter is not None:
+            logical_widths = getattr(param, "logical_widths", None)
+            param_data, loaded_weight = param_shard_splitter(
+                param_data, loaded_weight, loaded_shard_id, logical_widths)
+
+        # Special case for Fp8 scales.
+        elif fp8_scales_shard_indexer is not None:
+            param_data, loaded_weight = fp8_scales_shard_indexer(
+                param_data, loaded_weight, loaded_shard_id)
+
+        else:
+            ignore_warning = getattr(param, "ignore_warning", False)
+            if not ignore_warning:
+                logger.warning(
+                    "Loading a weight without `output_dim` attribute in "
+                    "MergedColumnParallelLinear, assume the weight is "
+                    "the same for all partitions.")
+
+        if fp8_scales_shard_indexer is None:
+            if len(param_data.shape) == 0:
+                param_data = param_data.reshape(1)
+
+            if len(loaded_weight.shape) == 0:
+                loaded_weight = loaded_weight.reshape(1)
+
+        assert param_data.shape == loaded_weight.shape
+        param_data.copy_(loaded_weight)

@@ -221,7 +221,8 @@ class LLMEngine:
         self.liquid_config = liquid_config
         self.liquid_request_queue: Queue[LiquidRequest] = Queue() 
         self.execution_lock: threading.Lock = threading.Lock()
-        self.auto_scaler = AutoScaler(liquid_config=liquid_config)
+        if liquid_config is not None:
+            self.auto_scaler = AutoScaler(liquid_config=liquid_config)
         self.request_output_queue: Queue[RequestOutput] = Queue()
 
         if not self.model_config.skip_tokenizer_init:
