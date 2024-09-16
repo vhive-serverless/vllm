@@ -179,16 +179,6 @@ class LlamaAttention(nn.Module):
         self.q_size = self.num_heads * self.head_dim
         self.kv_size = self.num_kv_heads * self.head_dim
 
-    def delete_shard(self, shard_id):
-        pass
-        # if shard_id in self._shard_ids:
-            # self._shard_ids.remove(shard_id)
-
-    def append_shard(self, shard_id):
-        pass
-        # if shard_id not in self._shard_ids:
-            # self._shard_ids.append(shard_id)
-
     def forward(
         self,
         positions: torch.Tensor,
@@ -583,19 +573,19 @@ class LlamaForCausalLM(nn.Module):
             if hasattr(param, "num_shards"):
                 param.delete_shards(start_shard_id, end_shard_id)
                 # torch.cuda.empty_cache()
-        
+
 
         for layer in self.model.layers:
             for shard_id in range(start_shard_id, end_shard_id):
                 layer.self_attn.attn.delete_shard(shard_id)
-                layer.self_attn.delete_shard(shard_id)
             layer.self_attn.update_param()
 
-        
         for shard_id in range(start_shard_id, end_shard_id):
             index = self.shard_ids.index(shard_id)
             self.shard_ids.pop(index)
         self.model.embed_tokens.update_sharded_indices(shard_ids=self.shard_ids, total_num_shards=self.total_num_shards)
+        for layer in self.model.layers:
+            layer.self_attn.update_param()
                 
 
     def load_shards_weights(self, shard_ids: List[int], shards_weights: Dict[str, torch.Tensor]):
@@ -623,6 +613,8 @@ class LlamaForCausalLM(nn.Module):
             #     param.data.copy_(shards_weights[name])
         self.model.embed_tokens.update_sharded_indices(shard_ids=self.shard_ids, total_num_shards=self.total_num_shards)
         # self.shard_ids.append(shard_id)
+        for layer in self.model.layers:
+            layer.self_attn.update_param()
 
     def append_shards_weights(self, shard_ids: List[int], shards_weights: Dict[str, torch.Tensor]):
 
@@ -657,9 +649,10 @@ class LlamaForCausalLM(nn.Module):
         for layer in self.model.layers:
             for shard_id in range(start_shard_id, end_shard_id):
                 layer.self_attn.attn.append_shard(shard_id)
-                layer.self_attn.append_shard(shard_id)
-            layer.self_attn.update_param()
 
         for shard_id in range(start_shard_id, end_shard_id):
             self.shard_ids.append(shard_id)
         self.model.embed_tokens.update_sharded_indices(shard_ids=self.shard_ids, total_num_shards=self.total_num_shards)
+        for layer in self.model.layers:
+            layer.self_attn.update_param()
+ 

@@ -6,8 +6,8 @@ import torch
 
 import os
 
-# model = "meta-llama/Meta-Llama-3-8B"
-model = "facebook/opt-6.7b"
+model = "meta-llama/Meta-Llama-3-8B"
+# model = "facebook/opt-6.7b"
 # model_path = os.path.join("./models", model)
 
 def main():
@@ -28,7 +28,8 @@ def main():
     prompt = word 
     inputs = [prompt for _ in range(request_num)]
 
-    for i in range(25):
+    for i in range(1):
+        print(f"i: {i}")
         liquid_request = LiquidRequest(LiquidType.LIQUID_1_2)
         llm.do_liquid(liquid_request)
         liquid_request = LiquidRequest(LiquidType.LIQUID_2_4)
@@ -42,7 +43,7 @@ def main():
 
 
     output = llm.generate(inputs, sampling_params=sampling_params)
-    # print(f"output: {output[0].outputs[0].text}")
+    print(f"output: {output[0].outputs[0].text}")
 
 
 

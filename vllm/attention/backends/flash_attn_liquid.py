@@ -265,7 +265,7 @@ class FlashAttentionImpl(AttentionImpl):
     
     def delete_shard(self, shard_id: int):
         assert shard_id in self.shard_ids
-        self.num_heads -= self.num_kv_heads_per_shard
+        self.num_heads -= self.num_heads_per_shard
         self.num_kv_heads -= self.num_kv_heads_per_shard
 
         index = self.shard_ids.index(shard_id)
@@ -273,7 +273,7 @@ class FlashAttentionImpl(AttentionImpl):
 
     def append_shard(self, shard_id: int):
         assert shard_id not in self.shard_ids
-        self.num_heads += self.num_kv_heads_per_shard
+        self.num_heads += self.num_heads_per_shard
         self.num_kv_heads += self.num_kv_heads_per_shard
         self.shard_ids.append(shard_id)
 
