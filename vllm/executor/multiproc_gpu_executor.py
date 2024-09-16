@@ -15,7 +15,7 @@ from vllm.utils import (get_distributed_init_method, get_ip, get_open_port,
 from vllm.liquid.request import LiquidRequest, LiquidOutput, LiquidType
 from vllm.liquid.liquid_worker_info import LiquidWorkerInfo
 import time
-from vllm.liquid.utils import get_cuda_mem_info
+from vllm.liquid.utils import get_cuda_mem_info, get_gpu_processes_and_memory
 
 logger = init_logger(__name__)
 
@@ -266,12 +266,12 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         # if the worker has not been initialized before, send all tensor from the src, if has, only send sharded tensor
         only_send_sharded_weights = self.rank_worker_info_map[dst].initialized 
         # torch.cuda.empty_cache()
-        logger.info(f"Before liquid model weights, {get_cuda_mem_info()}")
+        logger.info(f"Before liquid model weights, {get_cuda_mem_info()}, {get_gpu_processes_and_memory()}")
         self._run_workers("liquid_model_weights", shard_ids=shard_ids, src=src, dst=dst, only_send_sharded_weights=only_send_sharded_weights, worker_ranks=[src, dst])
         liquid_output.finished_liquid_model_weights = time.time()
 
         
-        logger.info(f"After liquid model weights, {get_cuda_mem_info()}")
+        logger.info(f"After liquid model weights, {get_cuda_mem_info()}, {get_gpu_processes_and_memory()}")
         liquid_output.finished_init_mem = time.time()
 
         # if dst has not initialize, then kv cache should be loaded, otherwise it should be appended
@@ -281,7 +281,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         self._run_workers("liquid_kv_cache", shard_ids=shard_ids, src=src, dst=dst, load_kv_cache = load_kv_cache, worker_ranks=[src, dst])
         liquid_output.finished_liquid_kvc = time.time()
 
-        logger.info(f"After liquid kvc, {get_cuda_mem_info()}")
+        logger.info(f"After liquid kvc, {get_cuda_mem_info()}, {get_gpu_processes_and_memory()}")
         self.rank_worker_info_map[dst].initialized = True
          
 
