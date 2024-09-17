@@ -30,7 +30,7 @@ from vllm.liquid.utils import send_dict, receive_dict
 from vllm.model_executor.model_loader.utils import (get_model_architecture,
                                                     set_default_torch_dtype)
 import time
-from vllm.liquid.sharded_parameter import QKVShardedParameter, ShardedParameter
+from vllm.liquid.sharded_parameter import QKVShardedParameter, ShardedParameter, GateUpShardedParameter
 
 logger = init_logger(__name__)
 
@@ -175,6 +175,9 @@ class ModelRunner:
                 param_names.append(f"{name}_q")
                 param_names.append(f"{name}_k")
                 param_names.append(f"{name}_v")
+            elif isinstance(param, GateUpShardedParameter):
+                param_names.append(f"{name}_gate")
+                param_names.append(f"{name}_up")
             elif isinstance(param, ShardedParameter):
                 param_names.append(name)
             else:

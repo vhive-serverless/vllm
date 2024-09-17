@@ -1,3 +1,4 @@
+
 from vllm import LLM, SamplingParams
 from vllm.liquid.request import LiquidRequest, LiquidType
 # from vllm import EngineArgs, LLMEngine
@@ -15,14 +16,14 @@ def main():
         model, 
         enforce_eager=True,
         # load_format="auto",
-        # tensor_parallel_size=2,
-        liquid_gpu_range = [0,1,2,3],
-        liquid_gpu_space = 32,
-        liquid_driver_gpu_id = 0, 
-        liquid_total_num_shards = 4,
+        tensor_parallel_size=2,
+        # liquid_gpu_range = [0,1,2,3],
+        # liquid_gpu_space = 32,
+        # liquid_driver_gpu_id = 0, 
+        # liquid_total_num_shards = 4,
         gpu_memory_utilization=0.8,
     )
-    sampling_params = SamplingParams(temperature=0, min_tokens=10, max_tokens=10)
+    sampling_params = SamplingParams(temperature=0, min_tokens=128, max_tokens=128)
     request_num = 1
     word = "what is LLM?" 
     prompt = word 
@@ -32,13 +33,14 @@ def main():
 #         print(f"i: {i}")
 #         liquid_request = LiquidRequest(LiquidType.LIQUID_1_2)
 #         llm.do_liquid(liquid_request)
-#     #    liquid_request = LiquidRequest(LiquidType.LIQUID_2_4)
-#     #    llm.do_liquid(liquid_request)
+# #        liquid_request = LiquidRequest(LiquidType.LIQUID_2_4)
+# #        llm.do_liquid(liquid_request)
 # #        liquid_request = LiquidRequest(LiquidType.LIQUID_4_2)
 # #        llm.do_liquid(liquid_request)
 #         liquid_request = LiquidRequest(LiquidType.LIQUID_2_1)
 #         llm.do_liquid(liquid_request)
     
+#     print("liquid done")
 
 
     output = llm.generate(inputs, sampling_params=sampling_params)

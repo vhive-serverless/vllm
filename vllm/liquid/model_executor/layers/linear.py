@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Tuple
 import torch
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
-from vllm.liquid.sharded_parameter import ShardedParameter, QKVShardedParameter
+from vllm.liquid.sharded_parameter import ShardedParameter, QKVShardedParameter,GateUpShardedParameter 
 
 from vllm.distributed import (divide, get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size,
@@ -781,7 +781,9 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                          params_dtype=params_dtype,
                          quant_config=quant_config,
                          shard_ids=shard_ids,
-                         total_num_shards=total_num_shards,)
+                         total_num_shards=total_num_shards,
+                        param_class=GateUpShardedParameter,
+                         )
 
     def weight_loader(self,
                       param: Parameter,

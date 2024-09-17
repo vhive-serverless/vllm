@@ -57,7 +57,7 @@ from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.sequence import SamplerOutput
 from vllm.utils import is_hip, print_warning_once
 from vllm.config import LiquidConfig
-from vllm.liquid.sharded_parameter import ShardedParameter, QKVShardedParameter
+from vllm.liquid.sharded_parameter import ShardedParameter, QKVShardedParameter, GateUpShardedParameter
 from vllm.liquid.utils import get_cuda_mem_info
 
 
@@ -395,7 +395,6 @@ class LlamaForCausalLM(nn.Module):
         self.unpadded_vocab_size = config.vocab_size
         if lora_config:
             self.unpadded_vocab_size += lora_config.lora_extra_vocab_size
-        # TODO
         self.lm_head = ParallelLMHead(
             self.unpadded_vocab_size,
             config.hidden_size,
@@ -499,26 +498,26 @@ class LlamaForCausalLM(nn.Module):
     # If this function is called, it should always initialize KV cache scale
     # factors (or else raise an exception). Thus, handled exceptions should
     # make sure to leave KV cache scale factors in a known good (dummy) state
-    def load_kv_cache_scales(self, quantization_param_path: str) -> None:
-        tp_size = get_tensor_model_parallel_world_size()
-        tp_rank = get_tensor_model_parallel_rank()
-        for layer_idx, scaling_factor in kv_cache_scales_loader(
-                quantization_param_path, tp_rank, tp_size,
-                self.config.num_hidden_layers,
-                self.config.__class__.model_type):
-            layer_self_attn = self.model.layers[layer_idx].self_attn
+    # def load_kv_cache_scales(self, quantization_param_path: str) -> None:
+    #     tp_size = get_tensor_model_parallel_world_size()
+    #     tp_rank = get_tensor_model_parallel_rank()
+    #     for layer_idx, scaling_factor in kv_cache_scales_loader(
+    #             quantization_param_path, tp_rank, tp_size,
+    #             self.config.num_hidden_layers,
+    #             self.config.__class__.model_type):
+    #         layer_self_attn = self.model.layers[layer_idx].self_attn
 
-            if is_hip():
-                # The scaling factor convention we are assuming is
-                # quantized_value * scaling_factor ~= true_value
-                # which is consistent with the practice of setting
-                # scaling_factor = tensor_amax / FPtype_max
-                scaling_factor *= 2
-            if hasattr(layer_self_attn, "kv_scale"):
-                layer_self_attn.attn._kv_scale = scaling_factor
-            else:
-                raise RuntimeError("Self attention has no KV cache scaling "
-                                   "factor attribute!")
+    #         if is_hip():
+    #             # The scaling factor convention we are assuming is
+    #             # quantized_value * scaling_factor ~= true_value
+    #             # which is consistent with the practice of setting
+    #             # scaling_factor = tensor_amax / FPtype_max
+    #             scaling_factor *= 2
+    #         if hasattr(layer_self_attn, "kv_scale"):
+    #             layer_self_attn.attn._kv_scale = scaling_factor
+    #         else:
+    #             raise RuntimeError("Self attention has no KV cache scaling "
+    #                                "factor attribute!")
 
     def named_sharded_parameters(self):
         for name, param in self.named_parameters():
@@ -534,7 +533,7 @@ class LlamaForCausalLM(nn.Module):
         sorted_named_params = sorted(named_params, key=lambda x: x[1].numel(), reverse=True)
         
         return sorted_named_params
-        
+    
 
 
     def get_shards_weights(self, shard_ids: List[int], only_sharded: bool = True) -> Dict[str, torch.Tensor]:
@@ -552,6 +551,10 @@ class LlamaForCausalLM(nn.Module):
                 results[f"{name}_q"] = q_shard
                 results[f"{name}_k"] = k_shard
                 results[f"{name}_v"] = v_shard
+            elif isinstance(param, GateUpShardedParameter):
+                gate_shard, up_shard = param.get_shards(start_shard_id, end_shard_id)
+                results[f"{name}_gate"] = gate_shard
+                results[f"{name}_up"] = up_shard
             elif isinstance(param, ShardedParameter):
                 results[name] = param.get_shards(start_shard_id, end_shard_id)
             else:
@@ -607,6 +610,12 @@ class LlamaForCausalLM(nn.Module):
                 q_data.copy_(q_shard)
                 k_data.copy_(k_shard)
                 v_data.copy_(v_shard)
+            elif isinstance(param, GateUpShardedParameter):
+                gate_shard = shards_weights[f"{name}_gate"]
+                up_shard = shards_weights[f"{name}_up"]
+                gate_data, up_data = param.chunk(2, dim=param.shard_dim)
+                gate_data.copy_(gate_shard)
+                up_data.copy_(up_shard)
             else:
                 param.data.copy_(shards_weights[name])
             # if name in shards_weights.keys():
@@ -636,6 +645,14 @@ class LlamaForCausalLM(nn.Module):
                     # param.extend_and_load_shard(q_shard, k_shard, v_shard)
                     del q_shard, k_shard, v_shard
                     del shards_weights[f"{name}_q"], shards_weights[f"{name}_k"], shards_weights[f"{name}_v"]
+                    # torch.cuda.empty_cache()
+                elif isinstance(param, GateUpShardedParameter):
+                    gate_shard = shards_weights[f"{name}_gate"]
+                    up_shard = shards_weights[f"{name}_up"]
+                    param.append_shards(start_shard_id, end_shard_id ,gate_shard, up_shard)
+                    # param.extend_and_load_shard(gate_shard, up_shard)
+                    del gate_shard, up_shard
+                    del shards_weights[f"{name}_gate"], shards_weights[f"{name}_up"]
                     # torch.cuda.empty_cache()
                 elif isinstance(param, ShardedParameter):
                     param.append_shards(start_shard_id, end_shard_id ,shards_weights[name])

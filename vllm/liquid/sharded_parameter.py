@@ -289,3 +289,58 @@ class QKVShardedParameter(ShardedParameter):
         # self.q_data, self.k_data, self.v_data = self.data.chunk(3, dim=self.shard_dim)
 
         self.data = new_data
+
+# TODO: current is llama3 only
+class GateUpShardedParameter(ShardedParameter):
+    def __init__(self,
+                data: torch.Tensor,
+                num_shards: int = 1,
+                shard_dim: int = 0,
+                shard_ids: Optional[List[int]] = None,
+                requires_grad: bool = False,
+                ):
+        super().__init__(data, num_shards, shard_dim, shard_ids)
+        self.requires_grad = requires_grad
+        self.shard_size = self.shard_size // 2
+        assert self.size(shard_dim) % 2 == 0, f"merged column parameter must have a length divisible by 2 along dim: {shard_dim}"
+    
+    def get_shards(self, start_shard_id: int, end_shard_id: int) -> torch.Tensor:
+        gate_data, up_data = self.data.chunk(2, self.shard_dim)
+        gate_shards = self._get_shards(gate_data, start_shard_id, end_shard_id)
+        up_shards = self._get_shards(up_data, start_shard_id, end_shard_id)
+        return gate_shards, up_shards
+
+    def delete_shards(self, start_shard_id: int, end_shard_id: int) -> None:
+        gate_data, up_data = self.data.chunk(2, self.shard_dim)
+        gate_data = self._delete_shards(gate_data, start_shard_id, end_shard_id)
+        up_data = self._delete_shards(up_data, start_shard_id, end_shard_id)
+        new_data = torch.cat([gate_data, up_data], dim=self.shard_dim)
+        self.data = new_data
+        for shard_id in range(start_shard_id, end_shard_id):
+            index = self.shard_ids.index(shard_id)
+            self.shard_ids.pop(index)
+
+    def append_shards(self, start_shard_id: int, end_shard_id: int, gate_shard: torch.Tensor, up_shard: torch.Tensor) -> None:
+        if self.shard_ids == []:
+            self.data = torch.cat([gate_shard, up_shard])
+        else:
+            self.extend_and_load_shard(gate_shard, up_shard)
+        for shard_id in range(start_shard_id, end_shard_id):
+            self.shard_ids.append(shard_id)
+    
+    def extend_and_load_shard(self, gate_shard: torch.Tensor, up_shard: torch.Tensor) -> None:
+        shape = list(self.data.shape)
+        shape[self.shard_dim] = shape[self.shard_dim] * 2
+        new_shape = torch.Size(shape)
+        new_data = torch.empty(
+            size=new_shape,
+            dtype=self.data.dtype,
+            device=self.data.device,
+        )
+        gate_data, up_data = self.data.chunk(chunks=2, dim=self.shard_dim)
+        new_gate_data, new_up_data = new_data.chunk(chunks=2, dim=self.shard_dim)
+
+        self._in_place_cat(new_gate_data, gate_data, gate_shard)
+        self._in_place_cat(new_up_data, up_data, up_shard)
+
+        self.data = new_data

@@ -832,8 +832,9 @@ class LLMEngine:
         """
         # self.model_executor.delete_kv_cache()
         cache_usage = self.get_latest_metrics().gpu_cache_usage
-        # liquid_request = None
-        liquid_request = self.auto_scaler.step(cache_usage)
+        liquid_request = None
+        if self.liquid_config is not None:
+            liquid_request = self.auto_scaler.step(cache_usage)
         if liquid_request is not None:
             self.liquid_request_queue.put(liquid_request)
 
