@@ -133,17 +133,17 @@ def get_tensor_num_bytes(tensor: torch.Tensor) -> int:
     total_memory_bytes = (num_elements * bits) // 8
     return total_memory_bytes
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 def get_cuda_mem_info(device: int=0) -> str:
-        torch.cuda.set_deivce(f"cuda:{device}")
+        # torch.cuda.set_device(f"cuda:{device}")
         if DEBUG_MODE:
             torch.cuda.empty_cache()
-        free_mem, _ = torch.cuda.mem_get_info()
-        allocated_space = torch.cuda.memory_allocated()
-        researved_space = torch.cuda.memory_reserved()
+        free_mem, _ = torch.cuda.mem_get_info(device)
+        allocated_space = torch.cuda.memory_allocated(device)
+        researved_space = torch.cuda.memory_reserved(device)
      
-        return f"allocated space on GPU: {allocated_space/(1024**3):.3f} GB, reserved space on GPU: {researved_space/(1024**3):.3f} GB, free space: {free_mem/(1024**3):.3f}GB, frag space: {(researved_space - allocated_space)/(1024**3):.3f}GB"
+        return f"allocated space on GPU {device}: {allocated_space/(1024**3):.3f} GB, reserved space on GPU {device}: {researved_space/(1024**3):.3f} GB, free space: {free_mem/(1024**3):.3f}GB, frag space: {(researved_space - allocated_space)/(1024**3):.3f}GB"
 
 def get_gpu_processes_and_memory(gpu_id=0):
     # Run the nvidia-smi command to get the details of the processes on a specific GPU

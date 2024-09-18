@@ -214,7 +214,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
                 src_to_dsts.append((src_block_id,dst_block_id))   
 
             logger.info(f"Shrink to: #{num_gpu_blocks}, currently using blocks: #{len(src_to_dsts)}")
-            logger.info(f"Before move and shrink: {get_cuda_mem_info()}")
+            logger.info(f"Before move and shrink: on GPU: {get_cuda_mem_info()}")
             self._run_workers("move_and_shrink_gpu_blocks", src_to_dsts=src_to_dsts, num_gpu_blocks=num_gpu_blocks, worker_ranks=[src, dst])
             logger.info(f"After move and shrink: {get_cuda_mem_info()}")
             liquid_output.finished_move_and_shrink = time.time()
@@ -267,7 +267,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         liquid_output.finished_liquid_model_weights = time.time()
 
         
-        logger.info(f"After liquid model weights, {get_cuda_mem_info()}, {get_gpu_processes_and_memory()}")
+        logger.info(f"After liquid model weights, {get_cuda_mem_info(0)}, {get_cuda_mem_info(1)}")
         liquid_output.finished_init_mem = time.time()
 
         # if dst has not initialize, then kv cache should be loaded, otherwise it should be appended
@@ -277,7 +277,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         self._run_workers("liquid_kv_cache", shard_ids=shard_ids, src=src, dst=dst, load_kv_cache = load_kv_cache, worker_ranks=[src, dst])
         liquid_output.finished_liquid_kvc = time.time()
 
-        logger.info(f"After liquid kvc, {get_cuda_mem_info()}, {get_gpu_processes_and_memory()}")
+        logger.info(f"After liquid kvc, {get_cuda_mem_info(0)}, {get_cuda_mem_info(1)}")
         self.rank_worker_info_map[dst].initialized = True
          
 

@@ -162,13 +162,13 @@ class Worker(WorkerBase):
                 self.model_runner.model.load_shards_weights(shard_ids,shards_weights)
                 print(f"It takes {time.time() - start:.2f} to load shards")
             else:
-                logger.info(f"Before appending weights shards, {get_cuda_mem_info()}")
+                logger.info(f"Before appending weights shards, {get_cuda_mem_info(self.rank)}")
                 shards_weights = self.model_runner.recv_shards(shard_ids, src, only_sharded=True)
                 torch.cuda.empty_cache()
-                logger.info(f"After recving weights shards, {get_cuda_mem_info()}")               
+                logger.info(f"After recving weights shards, {get_cuda_mem_info(self.rank)}")               
                 self.model_runner.model.append_shards_weights(shard_ids, 
                     shards_weights = shards_weights)
-                logger.info(f"After appending weights shards, {get_cuda_mem_info()}")
+                logger.info(f"After appending weights shards, {get_cuda_mem_info(self.rank)}")
             for name, weight in shards_weights.items():
                 del weight
             del shards_weights
@@ -186,19 +186,13 @@ class Worker(WorkerBase):
         # profiled peak memory.
         torch.cuda.synchronize()
         free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
-        # NOTE(woosuk): Here we assume that the other processes using the same
-        # GPU did not change their memory usage during the profiling.
-        peak_memory = self.init_gpu_memory - free_gpu_memory
-        logger.info(f"rank: {self.rank}, free_memory: {free_gpu_memory/(1024**3):.1f}GB")
-        assert peak_memory > 0, (
-            "Error in memory profiling. This happens when the GPU memory was "
-            "not properly cleaned up before initializing the vLLM instance.")
+        left_empty_gpu_memory = total_gpu_memory * (1 - self.cache_config.gpu_memory_utilization)
+
+        increased_gpu_memory = free_gpu_memory - left_empty_gpu_memory
 
         cache_block_size = self.get_gpu_block_size_bytes()
         
-        num_gpu_blocks = int(
-            (total_gpu_memory * self.cache_config.gpu_memory_utilization -
-             peak_memory) // cache_block_size)
+        num_gpu_blocks = int(increased_gpu_memory // cache_block_size)
         return num_gpu_blocks
 
     def extend_gpu_blocks(self, num_gpu_blocks: int):
@@ -218,14 +212,20 @@ class Worker(WorkerBase):
         if self.rank == src:
             bytes_sent = self.cache_engine.send_shards(shard_ids, dst)
         else:
-            start = time.time()
+            logger.info(f"Before recv kvc shards, {get_cuda_mem_info(self.rank)}")
             shards_cache = self.cache_engine.recv_shards(shard_ids, src)
+            logger.info(f"After recv kvc shards, {get_cuda_mem_info(self.rank)}")
             if load_kv_cache:
                 
                 self.cache_engine.load_shards(shard_ids,shards_cache)
             else:
                 self.cache_engine.append_shards(shard_ids, shards_cache)
+            logger.info(f"After appending kvc shards, {get_cuda_mem_info(self.rank)}")
+            for name, weight in shards_cache.items():
+                del weight
+            del shards_cache
             torch.cuda.empty_cache()
+            logger.info(f"After appending kvc shards, {get_cuda_mem_info(self.rank)}")
 
 
     def save_sharded_state(
