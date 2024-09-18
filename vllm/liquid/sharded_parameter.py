@@ -4,7 +4,7 @@ from typing import List, Optional, Any, Dict
 
 
 class ShardedParameter(Parameter):
-    def __new__(cls, data=None, requires_grad=False, num_shards=1, shard_dim=0, shard_ids=None):
+    def __new__(cls, data=None, requires_grad=False, num_shards=1, shard_dim=0, shard_ids=None, **kwargs):
         # Call the __new__ method of the Parameter class
         instance = super(ShardedParameter, cls).__new__(cls, data, requires_grad)
         return instance
@@ -35,56 +35,62 @@ class ShardedParameter(Parameter):
         pass
 
 
-    def _get_shard(self, tensor: torch.Tensor, shard_id: int) -> torch.Tensor:
+    def _get_shard(self, tensor: torch.Tensor, shard_id: int, shard_size: Optional[int]=None) -> torch.Tensor:
+        if shard_size is None:
+            shard_size = self.shard_size
         index = self.shard_ids.index(shard_id)
-        start_index = index * self.shard_size
+        start_index = index * shard_size
 
-        shard = tensor.narrow(self.shard_dim, start_index, self.shard_size)
+        shard = tensor.narrow(self.shard_dim, start_index, shard_size)
         return shard
 
-    def _get_shards(self, tensor: torch.Tensor, start_shard_id: int, end_shard_id: int) -> torch.Tensor:
+    def _get_shards(self, tensor: torch.Tensor, start_shard_id: int, end_shard_id: int, shard_size: Optional[int]=None) -> torch.Tensor:
+        if shard_size is None:
+            shard_size = self.shard_size
         index = self.shard_ids.index(start_shard_id)
-        start_index = index*self.shard_size
+        start_index = index*shard_size
 
-        shards = tensor.narrow(self.shard_dim, start_index, self.shard_size*(end_shard_id - start_shard_id))
+        shards = tensor.narrow(self.shard_dim, start_index, shard_size*(end_shard_id - start_shard_id))
         return shards
         
 
-    def get_shard(self, shard_id: int) -> torch.Tensor:
+    def get_shard(self, shard_id: int, shard_size: Optional[int] = None) -> torch.Tensor:
         if shard_id not in self.shard_ids:
             raise ValueError(f"shard_id: {shard_id} not in self.shard_ids")
 
-        shard = self._get_shard(self.data, shard_id)
+        shard = self._get_shard(self.data, shard_id, shard_size)
         return shard
 
-    def get_shards(self, start_shard_id: int, end_shard_id: int) -> torch.Tensor:
-        shards = self._get_shards(self.data, start_shard_id, end_shard_id)
+    def get_shards(self, start_shard_id: int, end_shard_id: int, shard_size: Optional[int] = None) -> torch.Tensor:
+        shards = self._get_shards(self.data, start_shard_id, end_shard_id, shard_size)
         return shards
 
-    def _delete_shards(self, tensor: torch.Tensor, start_shard_id: int, end_shard_id: int) -> torch.Tensor:
+    def _delete_shards(self, tensor: torch.Tensor, start_shard_id: int, end_shard_id: int, shard_size: Optional[int]=None) -> torch.Tensor:
         index = self.shard_ids.index(start_shard_id)
-
-        start_index = index * self.shard_size
+        if shard_size is None:
+            shard_size = self.shard_size
+        start_index = index * shard_size
         before_shard = tensor.narrow(self.shard_dim, 0, start_index)
-        after_shard = tensor.narrow(self.shard_dim, start_index + self.shard_size*(end_shard_id - start_shard_id), tensor.size(self.shard_dim) - start_index - self.shard_size*(end_shard_id - start_shard_id))
+        after_shard = tensor.narrow(self.shard_dim, start_index + shard_size*(end_shard_id - start_shard_id), tensor.size(self.shard_dim) - start_index - shard_size*(end_shard_id - start_shard_id))
         new_data = torch.cat([before_shard, after_shard], dim=self.shard_dim)
         return new_data
 
-    def _delete_shard(self, tensor: torch.Tensor, shard_id: int) -> torch.Tensor:
+    def _delete_shard(self, tensor: torch.Tensor, shard_id: int, shard_size: Optional[int]=None) -> torch.Tensor:
         index = self.shard_ids.index(shard_id)
-
-        start_index = index * self.shard_size
+        if shard_size is None:
+            shard_size = self.shard_size
+        start_index = index * shard_size
         # Create views of the tensor parts before and after the shard
         before_shard = tensor.narrow(self.shard_dim, 0, start_index)
-        after_shard = tensor.narrow(self.shard_dim, start_index + self.shard_size, tensor.size(self.shard_dim) - start_index - self.shard_size)
+        after_shard = tensor.narrow(self.shard_dim, start_index + shard_size, tensor.size(self.shard_dim) - start_index - shard_size)
 
         # Concatenate the views to form a new tensor
         new_data = torch.cat([before_shard, after_shard], dim=self.shard_dim)
         del before_shard, after_shard
         return new_data
 
-    def delete_shards(self, start_shard_id: int, end_shard_id: int) -> None:
-        new_data = self._delete_shards(self.data, start_shard_id, end_shard_id)
+    def delete_shards(self, start_shard_id: int, end_shard_id: int, shard_size: Optional[int] = None) -> None:
+        new_data = self._delete_shards(self.data, start_shard_id, end_shard_id, shard_size)
         self.data = new_data
 
         for shard_id in range(start_shard_id, end_shard_id):
@@ -172,37 +178,72 @@ class QKVShardedParameter(ShardedParameter):
                  shard_dim: int = 0,
                  shard_ids : Optional[List[int]] = None,
                  requires_grad: bool = False,
+                 num_heads_ratio: int = 1,
+                 num_kv_heads_ratio: int = 1,
                  ):
         super().__init__(data, num_shards, shard_dim, shard_ids)
         self.requires_grad = requires_grad
-        self.shard_size = self.shard_size // 3
-        assert self.size(shard_dim) % 3 == 0, f"QKV parameter must have a length divisible by 3 along dim: {shard_dim}"
+        import math
+        d = math.gcd(num_heads_ratio, num_kv_heads_ratio)
+        num_heads_ratio = num_heads_ratio // d
+        num_kv_heads_ratio = num_kv_heads_ratio // d
+        self._num_heads_ratio = num_heads_ratio
+        self._num_kv_heads_ratio = num_kv_heads_ratio
+        # assert self.size(shard_dim) % 3 == 0, f"QKV parameter must have a length divisible by 3 along dim: {shard_dim}"
         # qkv_shard_size = self.size(shard_dim) // 3
         # self.q_data = self.narrow(shard_dim, 0, qkv_shard_size)
         # self.k_data = self.narrow(shard_dim, qkv_shard_size, qkv_shard_size)
         # self.v_data = self.narrow(shard_dim, 2*qkv_shard_size, qkv_shard_size)
         # self.q_data, self.k_data, self.v_data = data.chunk(3, shard_dim)
+    
+    def customize_chunk(self, data: torch.Tensor) -> torch.Tensor:
+        shape = list(data.shape)
+        if self.shard_dim >= len(shape):
+            raise ValueError(f"shard_dim: {self.shard_dim} is larger than the number of dimensions of the tensor: {len(shape)}")
+        siz = shape[self.shard_dim]
+        if siz % (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) != 0:
+            raise ValueError(f"QKV parameter must have a length divisible by {self._num_heads_ratio + 2 * self._num_kv_heads_ratio} along dim: {self.shard_dim}")
+        q_size = siz // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_heads_ratio
+        k_size = siz // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_kv_heads_ratio
+        v_size = siz // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_kv_heads_ratio
+        try:
+            q_tensor = torch.narrow(data,self.shard_dim, 0, q_size)
+            k_tensor = torch.narrow(data,self.shard_dim, q_size, k_size)
+            v_tensor = torch.narrow(data,self.shard_dim, q_size + k_size, v_size)
+        except Exception as e:
+            raise ValueError(f"shape: {data.shape}, dim: {self.shard_dim}, q_size: {q_size}, k_size: {k_size}, v_size: {v_size} ,Error in customizing chunk: {e}")
+        return q_tensor, k_tensor, v_tensor
+
 
     def get_shard(self, shard_id: int) -> torch.Tensor:
-        q_data, k_data, v_data = self.data.chunk(3, self.shard_dim)
-        q_shard = self._get_shard(q_data, shard_id)
-        k_shard = self._get_shard(k_data, shard_id)
-        v_shard = self._get_shard(v_data, shard_id)
+        q_data, k_data, v_data = self.customize_chunk(self.data)
+        q_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_heads_ratio
+        k_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_kv_heads_ratio
+        v_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_kv_heads_ratio
+        q_shard = self._get_shard(q_data, shard_id, q_shard_size)
+        k_shard = self._get_shard(k_data, shard_id, k_shard_size)
+        v_shard = self._get_shard(v_data, shard_id, v_shard_size)
 
         return q_shard, k_shard, v_shard
 
     def get_shards(self, start_shard_id: int, end_shard_id: int) -> torch.Tensor:
-        q_data, k_data, v_data = self.data.chunk(3, self.shard_dim)
-        q_shards = self._get_shards(q_data, start_shard_id, end_shard_id)
-        k_shards = self._get_shards(k_data, start_shard_id, end_shard_id)
-        v_shards = self._get_shards(v_data, start_shard_id, end_shard_id)
+        q_data, k_data, v_data = self.customize_chunk(self.data)
+        q_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_heads_ratio
+        k_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_kv_heads_ratio
+        v_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_kv_heads_ratio
+        q_shards = self._get_shards(q_data, start_shard_id, end_shard_id, q_shard_size)
+        k_shards = self._get_shards(k_data, start_shard_id, end_shard_id, k_shard_size)
+        v_shards = self._get_shards(v_data, start_shard_id, end_shard_id, v_shard_size)
         return q_shards, k_shards, v_shards
 
     def delete_shard(self, shard_id: int) -> None:
-        q_data, k_data, v_data = self.data.chunk(3, self.shard_dim)
-        q_data = self._delete_shard(q_data, shard_id)
-        k_data = self._delete_shard(k_data, shard_id)
-        v_data = self._delete_shard(v_data, shard_id)
+        q_data, k_data, v_data = self.customize_chunk(self.data)
+        q_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_heads_ratio
+        k_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_kv_heads_ratio
+        v_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_kv_heads_ratio
+        q_data = self._delete_shard(q_data, shard_id, q_shard_size)
+        k_data = self._delete_shard(k_data, shard_id, k_shard_size)
+        v_data = self._delete_shard(v_data, shard_id, v_shard_size)
 
         new_data = torch.cat([q_data, k_data, v_data], dim=self.shard_dim)
         self.data = new_data
@@ -213,10 +254,13 @@ class QKVShardedParameter(ShardedParameter):
         self.shard_ids.pop(index)
 
     def delete_shards(self, start_shard_id: int, end_shard_id: int):
-        q_data, k_data, v_data = self.data.chunk(3, self.shard_dim)
-        q_data = self._delete_shards(q_data, start_shard_id, end_shard_id)
-        k_data = self._delete_shards(k_data, start_shard_id, end_shard_id)
-        v_data = self._delete_shards(v_data, start_shard_id, end_shard_id)
+        q_data, k_data, v_data = self.customize_chunk(self.data)
+        q_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_heads_ratio
+        k_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_kv_heads_ratio
+        v_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_kv_heads_ratio
+        q_data = self._delete_shards(q_data, start_shard_id, end_shard_id, q_shard_size)
+        k_data = self._delete_shards(k_data, start_shard_id, end_shard_id, k_shard_size)
+        v_data = self._delete_shards(v_data, start_shard_id, end_shard_id, v_shard_size)
         new_data = torch.cat([q_data, k_data, v_data], dim=self.shard_dim)
         self.data = new_data
         # del q_data, k_data, v_data
@@ -233,7 +277,7 @@ class QKVShardedParameter(ShardedParameter):
             raise ValueError(f"shard_id: {shard_id} is already in self.shard_ids")
 
 
-        q_data, k_data, v_data = self.data.chunk(3, self.shard_dim)
+        q_data, k_data, v_data = self.customize_chunk(self.data)
         q_data = self._append_shard(q_data, q_shard)
         k_data = self._append_shard(k_data, k_shard)
         v_data = self._append_shard(v_data, v_shard)
@@ -243,22 +287,6 @@ class QKVShardedParameter(ShardedParameter):
         # self.q_data, self.k_data, self.v_data = self.data.chunk(3)
 
         self.shard_ids.append(shard_id) 
-
-    # def append_shards(self, start_shard_id: int, end_shard_id: int,q_shard: torch.Tensor, k_shard: torch.Tensor, v_shard: torch.Tensor) -> None:
-
-
-    #     q_data, k_data, v_data = self.data.chunk(3, self.shard_dim)
-    #     q_data = self._append_shard(q_data, q_shard)
-    #     k_data = self._append_shard(k_data, k_shard)
-    #     v_data = self._append_shard(v_data, v_shard)
-
-    #     self.data = torch.cat([q_data, k_data, v_data], dim=self.shard_dim)
-    #     del q_data, k_data, v_data
-    #     # del self.q_data, self.k_data, self.v_data
-    #     # self.q_data, self.k_data, self.v_data = self.data.chunk(3)
-
-    #     for shard_id in range(start_shard_id, end_shard_id):
-    #         self.shard_ids.append(shard_id) 
 
     def append_shards(self, start_shard_id: int, end_shard_id: int,q_shard: torch.Tensor, k_shard: torch.Tensor, v_shard: torch.Tensor) -> None:
         if self.shard_ids == []:
@@ -280,8 +308,8 @@ class QKVShardedParameter(ShardedParameter):
             dtype=self.data.dtype,
             device=self.data.device,
         )
-        q_data, k_data, v_data =self.data.chunk(chunks=3, dim=self.shard_dim)
-        new_q_data, new_k_data, new_v_data = new_data.chunk(chunks=3, dim=self.shard_dim)
+        q_data, k_data, v_data = self.customize_chunk(self.data)
+        new_q_data, new_k_data, new_v_data = self.customize_chunk(new_data)
 
         self._in_place_cat(new_q_data, q_data, q_shard)
         self._in_place_cat(new_k_data, k_data, k_shard)

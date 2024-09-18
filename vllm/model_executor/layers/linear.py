@@ -425,6 +425,7 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
             # for the packing.
             packed_dim = getattr(param, "packed_dim", None)
             if packed_dim == output_dim:
+                assert False
                 shard_size = shard_size // param.pack_factor
                 shard_offset = shard_offset // param.pack_factor
                 # Special case for Marlin.
@@ -433,6 +434,7 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
 
             use_bitsandbytes = getattr(param, "use_bitsandbytes", False)
             if use_bitsandbytes:
+                assert False
                 shard_size = loaded_weight.shape[output_dim]
                 shard_offset = loaded_weight.shape[output_dim] * \
                     loaded_shard_id
@@ -444,6 +446,7 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                                                  shard_size)
         # Special case for AQLM codebooks.
         elif is_metadata:
+            assert False
             # metadata indicates fixed size concatenated along dim 0
             shard_size = loaded_weight.shape[0]
             shard_offset = loaded_shard_id * shard_size
@@ -451,16 +454,19 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
 
         # If a param_shard_splitter is defined by the LinearMethod, use it.
         elif param_shard_splitter is not None:
+            assert False
             logical_widths = getattr(param, "logical_widths", None)
             param_data, loaded_weight = param_shard_splitter(
                 param_data, loaded_weight, loaded_shard_id, logical_widths)
 
         # Special case for Fp8 scales.
         elif fp8_scales_shard_indexer is not None:
+            assert False
             param_data, loaded_weight = fp8_scales_shard_indexer(
                 param_data, loaded_weight, loaded_shard_id)
 
         else:
+            assert False
             ignore_warning = getattr(param, "ignore_warning", False)
             if not ignore_warning:
                 logger.warning(

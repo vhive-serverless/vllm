@@ -443,6 +443,11 @@ class LlamaForCausalLM(nn.Module):
     ) -> Optional[SamplerOutput]:
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
+    
+    def check_weights(self):
+        for name, weight in self.model.named_parameters():
+            print(f"Name: {name}, Weight: {weight}")
+            print(f"\n\n")
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         stacked_params_mapping = [
@@ -606,7 +611,8 @@ class LlamaForCausalLM(nn.Module):
                 k_shard = shards_weights[f"{name}_k"]
                 v_shard = shards_weights[f"{name}_v"]
                 # print(param.requires_grad)
-                q_data, k_data, v_data = param.chunk(3, dim=param.shard_dim)
+                # q_data, k_data, v_data = param.chunk(3, dim=param.shard_dim)
+                q_data, k_data, v_data = param.customize_chunk(param.data)
                 q_data.copy_(q_shard)
                 k_data.copy_(k_shard)
                 v_data.copy_(v_shard)

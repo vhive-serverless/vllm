@@ -94,15 +94,28 @@ class LiquidLinearMethod(LinearMethodBase):
                        shard_dim: int = -1,
                        param_class = ShardedParameter,
                        **extra_weight_attrs):
-        weight = param_class(
-            data=torch.empty(sum(output_partition_sizes),
-                                        input_size_per_partition,
-                                        dtype=params_dtype),
-            num_shards=len(shard_ids),
-            shard_dim=shard_dim,
-            shard_ids=shard_ids,
-            requires_grad=False,
-        )
+        if param_class == QKVShardedParameter:
+            weight = QKVShardedParameter(
+                data=torch.empty(sum(output_partition_sizes),
+                                            input_size_per_partition,
+                                            dtype=params_dtype),
+                num_shards=len(shard_ids),
+                shard_dim=shard_dim,
+                shard_ids=shard_ids,
+                requires_grad=False,
+                num_heads_ratio=extra_weight_attrs['num_heads_ratio'],
+                num_kv_heads_ratio=extra_weight_attrs['num_kv_heads_ratio'],
+            )
+        else:
+            weight = param_class(
+                data=torch.empty(sum(output_partition_sizes),
+                                            input_size_per_partition,
+                                            dtype=params_dtype),
+                num_shards=len(shard_ids),
+                shard_dim=shard_dim,
+                shard_ids=shard_ids,
+                requires_grad=False,
+            )
         set_weight_attrs(weight, {"input_dim": 1, "output_dim": 0})
         layer.register_parameter("weight", weight)
         set_weight_attrs(weight, extra_weight_attrs)
@@ -276,6 +289,8 @@ class ColumnParallelLinear(LinearBase):
                  shard_ids: List[int] = [0],
                  total_num_shards: int = 1,
                  param_class = ShardedParameter,
+                 num_heads_ratio: int=1,
+                 num_kv_heads_ratio: int=1,
                  ):
         super().__init__(input_size, output_size, skip_bias_add, params_dtype,
                          quant_config)
@@ -310,6 +325,8 @@ class ColumnParallelLinear(LinearBase):
             shard_ids=shard_ids,
             shard_dim=shard_dim,
             param_class=param_class,
+            num_heads_ratio=num_heads_ratio,
+            num_kv_heads_ratio=num_kv_heads_ratio,
         )
         if bias:
             self.bias = param_class(
@@ -446,6 +463,8 @@ class QKVParallelLinear(ColumnParallelLinear):
                          shard_ids=shard_ids,
                          total_num_shards=total_num_shards,
                          param_class=QKVShardedParameter,
+                         num_heads_ratio=self.num_heads,
+                         num_kv_heads_ratio=self.num_kv_heads,
                          )
 
     def weight_loader(self,
