@@ -756,6 +756,7 @@ class LLMEngine:
         self.liquid_request_queue.put(liquid_request)
 
     def _do_liquid(self, liquid_request: LiquidRequest) -> LiquidOutput:
+        logger.info(f"---------Start {self.liquid_count}'th liquid: {liquid_request}---------")
         block_ids = self.scheduler.get_sorted_block_ids()
         liquid_output = self.model_executor.do_liquid(liquid_request, block_ids)
         self.scheduler.update_gpu_blocks(self.cache_config.num_gpu_blocks, liquid_output.src_to_dsts)
@@ -769,10 +770,10 @@ class LLMEngine:
 
                 # torch.cuda.memory._record_memory_history(max_entries=100000)
                 liquid_output = self._do_liquid(liquid_request)
-                logger.info(f"Finished liquid for {self.liquid_count} times, output: {liquid_output}, current mem info on GPU0: {get_cuda_mem_info()}\nprocesses running on gpu-0: {get_gpu_processes_and_memory()}")
+                logger.info(f"Finished liquid for {self.liquid_count} times, output: {liquid_output}, current mem info on GPU0: {get_cuda_mem_info()}, current gpu block: #{self.cache_config.num_gpu_blocks}")
                 self.liquid_count += 1
             except Exception as e:
-                logger.error(f"Failed to perform liquid! error: {e}, memory status: {get_cuda_mem_info()}\nprocesses running on gpu-0: {get_gpu_processes_and_memory()}")
+                logger.error(f"Failed to perform liquid! error: {e}, memory status: {get_cuda_mem_info()}, current gpu block: #{self.cache_config.num_gpu_blocks}")
                 raise Exception(e)
                 # torch.cuda.memory._record_memory_history(enabled=None)
                 # torch.cuda.memory._dump_snapshot(f"./torch_mem_dump.pickle")

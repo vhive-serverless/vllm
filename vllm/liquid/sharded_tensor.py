@@ -141,6 +141,9 @@ class ShardedTensor(Tensor):
         # torch.cuda.empty_cache()
 
     def append_shards(self, start_shard_id:int, end_shard_id: int, shard_data: torch.Tensor) -> None:
-        self.data = self._append_shard(self.data, shard_data)
+        if self.shard_ids == []:
+            self.data = shard_data.clone()
+        else:
+            self.data = self._append_shard(self.data, shard_data)
         for shard_id in range(start_shard_id, end_shard_id):
             self.shard_ids.append(shard_id)
