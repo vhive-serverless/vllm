@@ -196,6 +196,12 @@ class QKVShardedParameter(ShardedParameter):
         # self.v_data = self.narrow(shard_dim, 2*qkv_shard_size, qkv_shard_size)
         # self.q_data, self.k_data, self.v_data = data.chunk(3, shard_dim)
     
+    def get_qkv_size(self, siz: int) -> int:
+        q_size = siz // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_heads_ratio
+        k_size = siz // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_kv_heads_ratio
+        v_size = siz // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_kv_heads_ratio
+        return q_size, k_size, v_size
+    
     def customize_chunk(self, data: torch.Tensor) -> torch.Tensor:
         shape = list(data.shape)
         if self.shard_dim >= len(shape):
@@ -203,9 +209,7 @@ class QKVShardedParameter(ShardedParameter):
         siz = shape[self.shard_dim]
         if siz % (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) != 0:
             raise ValueError(f"QKV parameter must have a length divisible by {self._num_heads_ratio + 2 * self._num_kv_heads_ratio} along dim: {self.shard_dim}")
-        q_size = siz // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_heads_ratio
-        k_size = siz // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_kv_heads_ratio
-        v_size = siz // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_kv_heads_ratio
+        q_size, k_size, v_size = self.get_qkv_size(siz) 
         try:
             q_tensor = torch.narrow(data,self.shard_dim, 0, q_size)
             k_tensor = torch.narrow(data,self.shard_dim, q_size, k_size)
@@ -217,9 +221,7 @@ class QKVShardedParameter(ShardedParameter):
 
     def get_shard(self, shard_id: int) -> torch.Tensor:
         q_data, k_data, v_data = self.customize_chunk(self.data)
-        q_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_heads_ratio
-        k_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_kv_heads_ratio
-        v_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_kv_heads_ratio
+        q_shard_size, k_shard_size, v_shard_size = self.get_qkv_size(self.shard_size) 
         q_shard = self._get_shard(q_data, shard_id, q_shard_size)
         k_shard = self._get_shard(k_data, shard_id, k_shard_size)
         v_shard = self._get_shard(v_data, shard_id, v_shard_size)
@@ -228,9 +230,7 @@ class QKVShardedParameter(ShardedParameter):
 
     def get_shards(self, start_shard_id: int, end_shard_id: int) -> torch.Tensor:
         q_data, k_data, v_data = self.customize_chunk(self.data)
-        q_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_heads_ratio
-        k_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_kv_heads_ratio
-        v_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_kv_heads_ratio
+        q_shard_size, k_shard_size, v_shard_size = self.get_qkv_size(self.shard_size) 
         q_shards = self._get_shards(q_data, start_shard_id, end_shard_id, q_shard_size)
         k_shards = self._get_shards(k_data, start_shard_id, end_shard_id, k_shard_size)
         v_shards = self._get_shards(v_data, start_shard_id, end_shard_id, v_shard_size)
@@ -238,9 +238,7 @@ class QKVShardedParameter(ShardedParameter):
 
     def delete_shard(self, shard_id: int) -> None:
         q_data, k_data, v_data = self.customize_chunk(self.data)
-        q_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_heads_ratio
-        k_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_kv_heads_ratio
-        v_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_kv_heads_ratio
+        q_shard_size, k_shard_size, v_shard_size = self.get_qkv_size(self.shard_size) 
         q_data = self._delete_shard(q_data, shard_id, q_shard_size)
         k_data = self._delete_shard(k_data, shard_id, k_shard_size)
         v_data = self._delete_shard(v_data, shard_id, v_shard_size)
@@ -255,9 +253,7 @@ class QKVShardedParameter(ShardedParameter):
 
     def delete_shards(self, start_shard_id: int, end_shard_id: int):
         q_data, k_data, v_data = self.customize_chunk(self.data)
-        q_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_heads_ratio
-        k_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_kv_heads_ratio
-        v_shard_size = self.shard_size // (self._num_heads_ratio + 2 * self._num_kv_heads_ratio) * self._num_kv_heads_ratio
+        q_shard_size, k_shard_size, v_shard_size = self.get_qkv_size(self.shard_size) 
         q_data = self._delete_shards(q_data, start_shard_id, end_shard_id, q_shard_size)
         k_data = self._delete_shards(k_data, start_shard_id, end_shard_id, k_shard_size)
         v_data = self._delete_shards(v_data, start_shard_id, end_shard_id, v_shard_size)

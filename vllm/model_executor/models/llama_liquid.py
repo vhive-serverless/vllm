@@ -120,23 +120,13 @@ class LlamaAttention(nn.Module):
         self.total_num_shards = total_num_shards
 
         self.hidden_size = hidden_size
-        # tp_size = get_tensor_model_parallel_world_size()
         self.total_num_heads = num_heads
-        # assert self.total_num_heads % tp_size == 0
         self.total_num_kv_heads = num_kv_heads
         self.head_dim = hidden_size // self.total_num_heads
         self.rope_theta = rope_theta
         self.max_position_embeddings = max_position_embeddings
         self.scaling = self.head_dim**-0.5
         self.update_param()
-        # if self.total_num_kv_heads >= tp_size:
-        #     # Number of KV heads is greater than TP size, so we partition
-        #     # the KV heads across multiple tensor parallel GPUs.
-        #     assert self.total_num_kv_heads % tp_size == 0
-        # else:
-        #     # Number of KV heads is less than TP size, so we replicate
-        #     # the KV heads across multiple tensor parallel GPUs.
-        #     assert tp_size % self.total_num_kv_heads == 0
         self.qkv_proj = QKVParallelLinear(
             hidden_size=hidden_size,
             head_size=self.head_dim,
@@ -503,26 +493,27 @@ class LlamaForCausalLM(nn.Module):
     # If this function is called, it should always initialize KV cache scale
     # factors (or else raise an exception). Thus, handled exceptions should
     # make sure to leave KV cache scale factors in a known good (dummy) state
-    # def load_kv_cache_scales(self, quantization_param_path: str) -> None:
-    #     tp_size = get_tensor_model_parallel_world_size()
-    #     tp_rank = get_tensor_model_parallel_rank()
-    #     for layer_idx, scaling_factor in kv_cache_scales_loader(
-    #             quantization_param_path, tp_rank, tp_size,
-    #             self.config.num_hidden_layers,
-    #             self.config.__class__.model_type):
-    #         layer_self_attn = self.model.layers[layer_idx].self_attn
+    def load_kv_cache_scales(self, quantization_param_path: str) -> None:
+        raise NotImplementedError
+        tp_size = get_tensor_model_parallel_world_size()
+        tp_rank = get_tensor_model_parallel_rank()
+        for layer_idx, scaling_factor in kv_cache_scales_loader(
+                quantization_param_path, tp_rank, tp_size,
+                self.config.num_hidden_layers,
+                self.config.__class__.model_type):
+            layer_self_attn = self.model.layers[layer_idx].self_attn
 
-    #         if is_hip():
-    #             # The scaling factor convention we are assuming is
-    #             # quantized_value * scaling_factor ~= true_value
-    #             # which is consistent with the practice of setting
-    #             # scaling_factor = tensor_amax / FPtype_max
-    #             scaling_factor *= 2
-    #         if hasattr(layer_self_attn, "kv_scale"):
-    #             layer_self_attn.attn._kv_scale = scaling_factor
-    #         else:
-    #             raise RuntimeError("Self attention has no KV cache scaling "
-    #                                "factor attribute!")
+            if is_hip():
+                # The scaling factor convention we are assuming is
+                # quantized_value * scaling_factor ~= true_value
+                # which is consistent with the practice of setting
+                # scaling_factor = tensor_amax / FPtype_max
+                scaling_factor *= 2
+            if hasattr(layer_self_attn, "kv_scale"):
+                layer_self_attn.attn._kv_scale = scaling_factor
+            else:
+                raise RuntimeError("Self attention has no KV cache scaling "
+                                   "factor attribute!")
 
     def named_sharded_parameters(self):
         for name, param in self.named_parameters():
