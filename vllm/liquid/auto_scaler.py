@@ -5,11 +5,12 @@ import time
 
 SCALE_OUT_THRESH = 0.9
 SCALE_IN_THRESH = 0.2
+SCALE_IN_WINDOW = 5
 
 class AutoScaler:
     def __init__(self, liquid_config: LiquidConfig) -> None:
         self.current_tp_level = 1
-        self.cache_time_window = 30 # 30 seconds
+        self.cache_time_window = SCALE_IN_WINDOW # 30 seconds
         self.liquid_config = liquid_config
         self.liquid_gpu_num = len(liquid_config.liquid_gpu_range)
         # cache util records will keep util records for 30 seconds

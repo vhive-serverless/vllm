@@ -159,10 +159,12 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             self.update_worker_info_map(src, dst, moved_shard_ids)
             active_ranks = self.get_active_ranks()
             self.update_active_ranks(active_ranks)
+            liquid_output.finished_update_workers = time.time()
             self.data_transmission(src, dst, moved_shard_ids, liquid_output)
 
             num_new_gpu_blocks_list = self._run_workers("determine_num_new_gpu_blocks", only_active_workers=True)
             num_new_gpu_blocks = min(num_new_gpu_blocks_list)
+            print(num_new_gpu_blocks)
             self.cache_config.num_gpu_blocks += num_new_gpu_blocks
             self.num_gpu_blocks_stack.append(self.cache_config.num_gpu_blocks)
 
@@ -177,6 +179,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             self.update_worker_info_map(1,3, [3])
             active_ranks = self.get_active_ranks()
             self.update_active_ranks(active_ranks)
+            liquid_output.finished_update_workers = time.time()
             self.data_transmission(0,2, [1], liquid_output=liquid_output)
             self.data_transmission(1,3, [3], liquid_output=liquid_output)
             num_new_gpu_blocks_list = self._run_workers("determine_num_new_gpu_blocks", only_active_workers=True)
@@ -199,6 +202,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             self.update_worker_info_map(src, dst, moved_shard_ids)
             active_ranks = self.get_active_ranks()
             self.update_active_ranks(active_ranks)
+            liquid_output.finished_update_workers = time.time()
             self.num_gpu_blocks_stack.pop()
             num_gpu_blocks = self.num_gpu_blocks_stack[-1] # Get the last element in the stack
 
@@ -225,6 +229,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             self.update_worker_info_map(3, 1, [3])
             active_ranks = self.get_active_ranks()
             self.update_active_ranks(active_ranks)
+            liquid_output.finished_update_workers = time.time()
             self.num_gpu_blocks_stack.pop()
             num_gpu_blocks = self.num_gpu_blocks_stack[-1]
 
@@ -250,17 +255,8 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
 
 
     def data_transmission(self, src: int, dst: int, shard_ids: List[int], liquid_output: LiquidOutput) -> None:
-        # liquid_output = LiquidOutput(shard_ids, src, dst)
-        # check if the src is active
-        # active_ranks = self.get_active_ranks()
-        # assert src in active_ranks, f"liquid src: {src} is not active!"
         logger.info(f"Start to do liquid from src: {src} to dst: {dst} with shard_ids: {shard_ids}")
 
-        # group_member_change = self.update_worker_info_map(src, dst, shard_ids)
-        # if group_member_change:
-        #     active_ranks = self.get_active_ranks()
-        #     self.update_active_ranks(active_ranks)
-        liquid_output.finished_update_workers = time.time()
         
         # load the shard data(model weights) in liquid mode
         # if the worker has not been initialized before, send all tensor from the src, if has, only send sharded tensor

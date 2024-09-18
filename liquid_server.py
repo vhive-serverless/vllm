@@ -22,7 +22,7 @@ class LiquidServer:
             liquid_gpu_space = 32,
             liquid_driver_gpu_id = 0, 
             liquid_total_num_shards = 4,
-            gpu_memory_utilization=0.85,
+#            gpu_memory_utilization=0.85,
         )
         with open(output_file_name, "w"):
             pass
@@ -56,8 +56,8 @@ class LiquidServer:
 
         command = [
                 './LLMLoadgen',
-                '-pattern', 'azure-code-130-5',
-                '-dataset', 'azure-code',
+                '-pattern', 'azure-conv-50-5',
+                '-dataset', 'azure-conv',
                 '-dst', 'liquid',
                 '-ip', 'localhost',
                 '-port', '8000',

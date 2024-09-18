@@ -13,7 +13,6 @@ from torch.distributed import ProcessGroup
 import vllm.envs as envs
 from vllm.logger import init_logger
 from vllm.liquid.liquid_communicator import LiquidCommunicator
-from vllm.liquid.utils import get_gpu_processes_and_memory, get_cuda_mem_info
 
 logger = init_logger(__name__)
 
