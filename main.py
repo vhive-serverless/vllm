@@ -28,15 +28,17 @@ def main():
     prompt = word 
     inputs = [prompt for _ in range(request_num)]
 
-    for i in range(25):
-        liquid_request = LiquidRequest(LiquidType.LIQUID_1_2)
-        llm.do_liquid(liquid_request)
-        liquid_request = LiquidRequest(LiquidType.LIQUID_2_4)
-        llm.do_liquid(liquid_request)
-        liquid_request = LiquidRequest(LiquidType.LIQUID_4_2)
-        llm.do_liquid(liquid_request)
-        liquid_request = LiquidRequest(LiquidType.LIQUID_2_1)
-        llm.do_liquid(liquid_request)
+    # for i in range(2):
+    liquid_request = LiquidRequest(LiquidType.LIQUID_1_2)
+    llm.do_liquid(liquid_request)
+        # liquid_request = LiquidRequest(LiquidType.LIQUID_2_4)
+        # llm.do_liquid(liquid_request)
+        # liquid_request = LiquidRequest(LiquidType.LIQUID_4_2)
+        # llm.do_liquid(liquid_request)
+    liquid_request = LiquidRequest(LiquidType.LIQUID_2_1)
+    llm.do_liquid(liquid_request)
+    liquid_request = LiquidRequest(LiquidType.LIQUID_1_2)
+    llm.do_liquid(liquid_request)
 
 
     output = llm.generate(inputs, sampling_params=sampling_params)

@@ -180,6 +180,7 @@ class Worker(WorkerBase):
             self._init_cache_engine(shard_ids)
 
     def determine_num_new_gpu_blocks(self) -> int:
+        torch.cuda.set_device(f"cuda:{self.rank}")
         torch.cuda.empty_cache()
         # Calculate the number of blocks that can be allocated with the
         # profiled peak memory.
@@ -188,11 +189,13 @@ class Worker(WorkerBase):
         # NOTE(woosuk): Here we assume that the other processes using the same
         # GPU did not change their memory usage during the profiling.
         peak_memory = self.init_gpu_memory - free_gpu_memory
+        logger.info(f"rank: {self.rank}, free_memory: {free_gpu_memory/(1024**3):.1f}GB")
         assert peak_memory > 0, (
             "Error in memory profiling. This happens when the GPU memory was "
             "not properly cleaned up before initializing the vLLM instance.")
 
         cache_block_size = self.get_gpu_block_size_bytes()
+        
         num_gpu_blocks = int(
             (total_gpu_memory * self.cache_config.gpu_memory_utilization -
              peak_memory) // cache_block_size)
@@ -275,6 +278,7 @@ class Worker(WorkerBase):
         # Calculate the number of blocks that can be allocated with the
         # profiled peak memory.
         torch.cuda.synchronize()
+        torch.cuda.empty_cache()
         free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
         # NOTE(woosuk): Here we assume that the other processes using the same
         # GPU did not change their memory usage during the profiling.

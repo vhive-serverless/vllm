@@ -135,7 +135,8 @@ def get_tensor_num_bytes(tensor: torch.Tensor) -> int:
 
 DEBUG_MODE = True
 
-def get_cuda_mem_info() -> str:
+def get_cuda_mem_info(device: int=0) -> str:
+        torch.cuda.set_deivce(f"cuda:{device}")
         if DEBUG_MODE:
             torch.cuda.empty_cache()
         free_mem, _ = torch.cuda.mem_get_info()
