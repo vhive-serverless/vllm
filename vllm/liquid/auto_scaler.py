@@ -4,15 +4,21 @@ from typing import List, Tuple, Dict, Optional
 import numpy as np
 import time
 
-SCALE_OUT_THRESH = 0.8
-SCALE_IN_THRESH = 0.3
+SCALE_OUT_THRESH_MAP = {
+    1: 0.9,
+    2: 0.98,
+    4: 1,
+}
+
+SCALE_IN_THRESH = 0.4
 SCALE_IN_THRESH_INSTANT = 0.2
+
+SCALE_OUT_WINDOW = 15
 SCALE_IN_WINDOW = 5
 
 class AutoScaler:
     def __init__(self, liquid_config: LiquidConfig) -> None:
         self.current_tp_level = 1
-        self.cache_time_window = SCALE_IN_WINDOW # 30 seconds
         self.liquid_config = liquid_config
         self.liquid_gpu_num = len(liquid_config.liquid_gpu_range)
         # cache util records will keep util records for 30 seconds
@@ -29,52 +35,34 @@ class AutoScaler:
 
         # check if we need to scale out
         liquid_request = None
-        # find out all records within 30 s
-        records_index_window = []
+        # find out all records within scale-out window
+        scale_out_records_index_window = []
         for i, ts in enumerate(self.timestamp_records):
-            if latest_timestamp - ts < self.cache_time_window:
-                records_index_window.append(i)
+            if latest_timestamp - ts < SCALE_OUT_WINDOW:
+                scale_out_records_index_window.append(i)
+        # find out all records within scale-in window 
+        scale_in_records_index_window = []
+        for i, ts in enumerate(self.timestamp_records):
+            if latest_timestamp - ts < SCALE_IN_WINDOW:
+                scale_in_records_index_window.append(i)
         # If the time window only contains one element, do not scale
-        if len(records_index_window) < 2:
+        cache_usages = [self.cache_usage_records[i] for i in scale_out_records_index_window]
+        cache_usages = np.array(cache_usages)
+        mean_value = np.mean(cache_usages)
+        if mean_value > SCALE_OUT_THRESH_MAP[self.current_tp_level]:
+            liquid_request = self._scale_out()
             return liquid_request
 
-        cache_usages = [self.cache_usage_records[i] for i in records_index_window]
+        cache_usages = [self.cache_usage_records[i] for i in scale_in_records_index_window]
         cache_usages = np.array(cache_usages)
 
         mean_value = np.mean(cache_usages)
 
-        if mean_value > SCALE_OUT_THRESH:
-            liquid_request = self._scale_out()
-        elif mean_value < SCALE_IN_THRESH:
+        if mean_value < SCALE_IN_THRESH:
             if cache_usage < SCALE_IN_THRESH_INSTANT:
                 liquid_request = self._scale_in()
-
-        # if cache_usage > SCALE_OUT_THRESH:
-        #     liquid_request = self._scale_out()
-        # # check if we need to scale in
-        # else:
-        #     # find out all records within 30 s
-        #     records_index_window = []
-        #     for i, ts in enumerate(self.timestamp_records):
-        #         if latest_timestamp - ts < self.cache_time_window:
-        #             records_index_window.append(i)
-        #     # If the time window only contains one element, also do not scale in
-        #     if len(records_index_window) < 2:
-        #         scale_in = False
-        #     else:
-        #         scale_in = True
-
-        #     # If mean value within the window is less than the SCALE_IN_WINDOW_THRESH and current usage is less than SCALE_IN_THREASH 
-        #     cache_usages = [self.cache_usage_records[i] for i in records_index_window]
-
-        #     mean_value = np.mean(cache_usages)
-        #     if cache_usage < SCALE_IN_THRESH and mean_value < SCALE_IN_WINDOW_THRESH:
-        #         scale_in = True
-
-        #     cache_usages = np.array(cache_usages)
-        #     if scale_in:
-        #         liquid_request = self._scale_in()
-        return liquid_request
+                return liquid_request
+        return None
 
     def _scale_in(self) -> Optional[LiquidRequest]:
         if self.current_tp_level == 2:
