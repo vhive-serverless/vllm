@@ -520,13 +520,13 @@ class LlamaForCausalLM(nn.Module):
             if hasattr(param, "shard_ids"):
                 yield name, param
 
-    def sorted_named_parameters(self):
+    def sorted_named_parameters(self, descending: bool = True):
         # sort the parameters first to avoid a memory fragmentation
         # Get the named parameters of the model
         named_params = list(self.named_parameters())
         
         # Sort the named parameters based on the number of elements (numel()) in descending order
-        sorted_named_params = sorted(named_params, key=lambda x: x[1].numel(), reverse=True)
+        sorted_named_params = sorted(named_params, key=lambda x: x[1].numel(), reverse=descending)
         
         return sorted_named_params
     
@@ -568,11 +568,29 @@ class LlamaForCausalLM(nn.Module):
             start_shard_id = shard_ids[0]
             end_shard_id = shard_ids[-1] + 1
 
-        for name, param in self.sorted_named_parameters():
+        shard_dim = self.lm_head.weight.shard_dim
+        lm_head_first_half, lm_head_last_half = self.lm_head.weight.chunk(2, shard_dim)
+        embed_token_first_half, _ = self.model.embed_tokens.weight.chunk(2, shard_dim)
+        lm_head_last_half.copy_(embed_token_first_half)
+        del embed_token_first_half
+        self.lm_head.weight.data = lm_head_first_half
+        self.model.embed_tokens.weight.data = lm_head_last_half 
+
+        self.lm_head.weight.delete_shard_indexs(start_shard_id, end_shard_id)
+        self.model.embed_tokens.weight.delete_shard_indexs(start_shard_id, end_shard_id)
+        
+        # print(f"Before deleting shards, {get_cuda_mem_info()}")
+        # torch.cuda.memory._record_memory_history(max_entries=100000, context="all")
+        for name, param in self.sorted_named_parameters(True):
             if hasattr(param, "num_shards"):
+                if name in ['lm_head.weight', 'model.embed_tokens.weight']:
+                    continue
                 param.delete_shards(start_shard_id, end_shard_id)
                 # torch.cuda.empty_cache()
-
+        # torch.cuda.empty_cache()
+        # print(f"After deleting shards, {get_cuda_mem_info()}")
+        # torch.cuda.memory._dump_snapshot(f"./torch_mem_dump.pickle")
+        # torch.cuda.memory._record_memory_history(enabled=None)
 
         for layer in self.model.layers:
             for shard_id in range(start_shard_id, end_shard_id):
@@ -633,7 +651,7 @@ class LlamaForCausalLM(nn.Module):
         # print(f"Before entering for loop, {get_cuda_mem_info()}")
         # torch.cuda.memory._record_memory_history(max_entries=100000, context="all")
         with torch.no_grad():
-            for name, param in self.sorted_named_parameters():
+            for name, param in self.sorted_named_parameters(False):
                 if isinstance(param, QKVShardedParameter):
                     q_shard = shards_weights[f"{name}_q"]
                     k_shard = shards_weights[f"{name}_k"]
@@ -655,7 +673,7 @@ class LlamaForCausalLM(nn.Module):
                     param.append_shards(start_shard_id, end_shard_id ,shards_weights[name])
                     # param.extend_and_load_shard(shard_data=shards_weights[name])
                     del shards_weights[name]
-            # torch.cuda.empty_cache()
+        torch.cuda.empty_cache()
         # print(f"After exit for loop, {get_cuda_mem_info()}")
         # torch.cuda.memory._dump_snapshot(f"./torch_mem_dump.pickle")
         # torch.cuda.memory._record_memory_history(enabled=None)

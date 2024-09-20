@@ -97,6 +97,12 @@ class ShardedParameter(Parameter):
             index = self.shard_ids.index(shard_id)
             self.shard_ids.pop(index)
 
+    def delete_shard_indexs(self, start_shard_id: int, end_shard_id: int):
+        for shard_id in range(start_shard_id, end_shard_id):
+            index = self.shard_ids.index(shard_id)
+            self.shard_ids.pop(index)
+
+
 
 
     def delete_shard(self, shard_id: int) -> None:

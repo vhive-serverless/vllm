@@ -133,7 +133,7 @@ def get_tensor_num_bytes(tensor: torch.Tensor) -> int:
     total_memory_bytes = (num_elements * bits) // 8
     return total_memory_bytes
 
-DEBUG_MODE = False
+DEBUG_MODE = True
 
 def get_cuda_mem_info(device: int=0) -> str:
         # torch.cuda.set_device(f"cuda:{device}")
