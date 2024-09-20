@@ -163,8 +163,6 @@ class ModelRunner:
         self.model.delete_shards(shard_ids)
         # logger.info(f"Successfully send model weights shards: {shard_ids} to rank: {dst}")
         torch.cuda.empty_cache()
-        free_mem, _ = torch.cuda.mem_get_info()
-        print(f"After sending shards, there are {free_mem/(1024**3):.2f}GB remaining on GPU0")
         return bytes_sent
 
     def recv_shards(self, shard_ids: List[int], src: int, only_sharded: bool = False):

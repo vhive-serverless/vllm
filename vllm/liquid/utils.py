@@ -4,6 +4,7 @@ import torch.distributed as dist
 import time
 import re
 from typing import Dict, List, Any
+import subprocess
 # Sender side functions
 def _encode_dict_to_tensors(tensor_dict, dtype=torch.float16):
     meta_data = {}
@@ -132,13 +133,42 @@ def get_tensor_num_bytes(tensor: torch.Tensor) -> int:
     total_memory_bytes = (num_elements * bits) // 8
     return total_memory_bytes
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 
-def get_cuda_mem_info() -> str:
+def get_cuda_mem_info(device: int=0) -> str:
+        # torch.cuda.set_device(f"cuda:{device}")
         if DEBUG_MODE:
             torch.cuda.empty_cache()
-        free_mem, _ = torch.cuda.mem_get_info()
-        allocated_space = torch.cuda.memory_allocated()
-        researved_space = torch.cuda.memory_reserved()
+        free_mem, _ = torch.cuda.mem_get_info(device)
+        allocated_space = torch.cuda.memory_allocated(device)
+        researved_space = torch.cuda.memory_reserved(device)
      
-        return f"allocated space on GPU: {allocated_space/(1024**3):.3f} GB, reserved space on GPU: {researved_space/(1024**3):.3f} GB, free space: {free_mem/(1024**3):.3f}GB, frag space: {(researved_space - allocated_space)/(1024**3):.3f}GB"
+        return f"allocated space on GPU {device}: {allocated_space/(1024**3):.3f} GB, reserved space on GPU {device}: {researved_space/(1024**3):.3f} GB, free space: {free_mem/(1024**3):.3f}GB, frag space: {(researved_space - allocated_space)/(1024**3):.3f}GB"
+
+def get_gpu_processes_and_memory(gpu_id=0):
+    # Run the nvidia-smi command to get the details of the processes on a specific GPU
+    command = f"nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits -i {gpu_id}"
+    
+    # Execute the command and capture the output
+    result = subprocess.run(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    
+    if result.returncode != 0:
+        print(f"Error running nvidia-smi: {result.stderr.decode('utf-8')}")
+        return None
+    
+    # Parse the result
+    output = result.stdout.decode('utf-8').strip()
+    
+    # Check if there are no processes using the GPU
+    if not output:
+        print(f"No processes are using GPU {gpu_id}")
+        return None
+    
+    # Split output into lines and extract PID and memory usage
+    process_info = []
+    for line in output.split('\n'):
+        pid, memory_used = line.split(',')
+        memory_used = float(memory_used.strip()) / (1024)
+        process_info.append((int(pid.strip()), memory_used))  # Convert to integers
+
+    return process_info

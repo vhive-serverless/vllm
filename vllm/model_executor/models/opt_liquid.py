@@ -363,11 +363,24 @@ class OPTForCausalLM(nn.Module):
 
     def sorted_named_parameters(self):
         # sort the parameters first to avoid a memory fragmentation
+        # When gets invoked and current shard_ids is not empty, record the order, when shard id is empty, use that order(shard id is 0, all tensor is 0 numnel, cannot sort)
         # Get the named parameters of the model
-        named_params = list(self.named_parameters())
-        
-        # Sort the named parameters based on the number of elements (numel()) in descending order
-        sorted_named_params = sorted(named_params, key=lambda x: x[1].numel(), reverse=True)
+        if len(self.shard_ids) != 0:
+            named_params = list(self.named_parameters())
+            
+            # Sort the named parameters based on the number of elements (numel()) in descending order
+            sorted_named_params = sorted(named_params, key=lambda x: x[1].numel(), reverse=True)
+
+            if not hasattr(self, "recorded_names"):
+                self.recorded_names = []
+                for name, _ in sorted_named_params:
+                    self.recorded_names.append(name)
+        else:
+            # use recorded_names instead
+            assert hasattr(self, "recorded_names")
+            sorted_named_params = []
+            for name in self.recorded_names:
+                sorted_named_params.append((name, self.get_parameter(name)))
         
         return sorted_named_params
         
@@ -432,6 +445,7 @@ class OPTForCausalLM(nn.Module):
         shard_id = shard_ids[0]
         assert shard_id in self.shard_ids, f"{shard_id} not in the model"
         for name, param in self.sorted_named_parameters():
+            # print(f"name: {name}")
             if isinstance(param, QKVShardedParameter):
                 q_shard = shards_weights[f"{name}_q"]
                 k_shard = shards_weights[f"{name}_k"]
@@ -461,6 +475,7 @@ class OPTForCausalLM(nn.Module):
         # torch.cuda.memory._record_memory_history(max_entries=100000, context="all")
         with torch.no_grad():
             for name, param in self.sorted_named_parameters():
+                # print(name)
                 if isinstance(param, QKVShardedParameter):
                     q_shard = shards_weights[f"{name}_q"]
                     k_shard = shards_weights[f"{name}_k"]
@@ -474,10 +489,6 @@ class OPTForCausalLM(nn.Module):
                     param.append_shards(start_shard_id, end_shard_id ,shards_weights[name])
                     # param.extend_and_load_shard(shard_data=shards_weights[name])
                     del shards_weights[name]
-            # torch.cuda.empty_cache()
-        # print(f"After exit for loop, {get_cuda_mem_info()}")
-        # torch.cuda.memory._dump_snapshot(f"./torch_mem_dump.pickle")
-        # torch.cuda.memory._record_memory_history(enabled=None)
         
         for layer in self.model.decoder.layers:
             for shard_id in range(start_shard_id, end_shard_id):
@@ -485,6 +496,7 @@ class OPTForCausalLM(nn.Module):
 
         for shard_id in range(start_shard_id, end_shard_id):
             self.shard_ids.append(shard_id)
+
         self.model.decoder.embed_tokens.update_sharded_indices(shard_ids=self.shard_ids, total_num_shards=self.total_num_shards)
 
 

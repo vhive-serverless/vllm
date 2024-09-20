@@ -13,6 +13,18 @@ class LiquidType(Enum):
 class LiquidRequest:
     liquid_type: LiquidType
 
+    def __repr__(self) -> str:
+        liquid_type_str = ""
+        if self.liquid_type == LiquidType.LIQUID_1_2:
+            liquid_type_str = "Scale out from GPU0 to GPU1"
+        elif self.liquid_type == LiquidType.LIQUID_2_4:
+            liquid_type_str = "Scale out from GPU[0,1] to GPU[2,3]"
+        elif self.liquid_type == LiquidType.LIQUID_4_2:
+            liquid_type_str = "Scale in from GPU[2,3] to GPU[0,1]"
+        elif self.liquid_type == LiquidType.LIQUID_2_1:
+            liquid_type_str = "Scale in from GPU1 to GPU 0"
+        return liquid_type_str
+
 # @dataclass
 # class LiquidRequest:
 #     '''Request to perform liquid operation, will be sent to scheduler for scheduling
