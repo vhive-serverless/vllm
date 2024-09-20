@@ -6,8 +6,8 @@ import torch
 
 import os
 
-model = "meta-llama/Meta-Llama-3-8B"
-# model = "facebook/opt-6.7b"
+# model = "meta-llama/Meta-Llama-3-8B"
+model = "facebook/opt-6.7b"
 # model_path = os.path.join("./models", model)
 
 def main():
@@ -17,29 +17,28 @@ def main():
         # load_format="auto",
         # tensor_parallel_size=2,
         # liquid_gpu_range = [0,1,2,3],
-        liquid_gpu_range = [0,1],
+        liquid_gpu_range = [0,1,2,3],
         liquid_gpu_space = 32,
         liquid_driver_gpu_id = 0, 
-        # liquid_total_num_shards = 4,
-        liquid_total_num_shards = 2,
-        gpu_memory_utilization=0.8,
+        liquid_total_num_shards = 4,
+        # liquid_total_num_shards = 2,
+        # gpu_memory_utilization=0.8,
     )
-    sampling_params = SamplingParams(temperature=0, min_tokens=10, max_tokens=10)
+    sampling_params = SamplingParams(temperature=0, min_tokens=128, max_tokens=128)
     request_num = 1
     word = "what is LLM?" 
     prompt = word 
     inputs = [prompt for _ in range(request_num)]
 
-    for i in range(1):
-        print(f"i: {i}")
+    for i in range(25):
         liquid_request = LiquidRequest(LiquidType.LIQUID_1_2)
         llm.do_liquid(liquid_request)
-# #     #    liquid_request = LiquidRequest(LiquidType.LIQUID_2_4)
-# #     #    llm.do_liquid(liquid_request)
-# # #        liquid_request = LiquidRequest(LiquidType.LIQUID_4_2)
-# # #        llm.do_liquid(liquid_request)
-#         liquid_request = LiquidRequest(LiquidType.LIQUID_2_1)
-#         llm.do_liquid(liquid_request)
+        liquid_request = LiquidRequest(LiquidType.LIQUID_2_4)
+        llm.do_liquid(liquid_request)
+        liquid_request = LiquidRequest(LiquidType.LIQUID_4_2)
+        llm.do_liquid(liquid_request)
+        liquid_request = LiquidRequest(LiquidType.LIQUID_2_1)
+        llm.do_liquid(liquid_request)
     
 
 
