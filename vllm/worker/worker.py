@@ -225,7 +225,7 @@ class Worker(WorkerBase):
                 del weight
             del shards_cache
             torch.cuda.empty_cache()
-            logger.info(f"After appending kvc shards, {get_cuda_mem_info(self.rank)}")
+            logger.info(f"After cleaning received kvc shards, {get_cuda_mem_info(self.rank)}")
 
 
     def save_sharded_state(

@@ -221,7 +221,8 @@ class LLMEngine:
         self.liquid_config = liquid_config
         self.liquid_request_queue: Queue[LiquidRequest] = Queue() 
         self.execution_lock: threading.Lock = threading.Lock()
-        self.auto_scaler = AutoScaler(liquid_config=liquid_config)
+        if liquid_config is not None:
+            self.auto_scaler = AutoScaler(liquid_config=liquid_config)
         self.request_output_queue: Queue[RequestOutput] = Queue()
 
         if not self.model_config.skip_tokenizer_init:
@@ -832,8 +833,9 @@ class LLMEngine:
         """
         # self.model_executor.delete_kv_cache()
         cache_usage = self.get_latest_metrics().gpu_cache_usage
-        # liquid_request = None
-        liquid_request = self.auto_scaler.step(cache_usage)
+        liquid_request = None
+        if self.liquid_config is not None:
+            liquid_request = self.auto_scaler.step(cache_usage)
         if liquid_request is not None:
             self.liquid_request_queue.put(liquid_request)
 
