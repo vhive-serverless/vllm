@@ -1235,3 +1235,10 @@ class Scheduler:
         block_ids = self.block_manager.get_all_blocks()
         block_ids.sort()
         return block_ids
+
+    def get_waiting_num_tokens(self) -> int:
+        num_waiting_tokens = 0
+        with self.waiting_lock:
+            for seq_group in self.waiting:
+                num_waiting_tokens += seq_group.get_num_uncomputed_tokens()
+        return num_waiting_tokens
