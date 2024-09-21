@@ -164,7 +164,6 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
 
             num_new_gpu_blocks_list = self._run_workers("determine_num_new_gpu_blocks", only_active_workers=True)
             num_new_gpu_blocks = min(num_new_gpu_blocks_list)
-            print(num_new_gpu_blocks)
             self.cache_config.num_gpu_blocks += num_new_gpu_blocks
             self.num_gpu_blocks_stack.append(self.cache_config.num_gpu_blocks)
 
