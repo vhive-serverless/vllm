@@ -1,17 +1,16 @@
 from vllm.liquid.request import LiquidOutput, LiquidRequest, LiquidType
-from vllm.config import LiquidConfig
+from vllm.config import LiquidConfig, CacheConfig
 from typing import List, Tuple, Dict, Optional
 import numpy as np
 import time
 
 SCALE_OUT_THRESH_MAP = {
-    1: 0.9,
-    2: 0.98,
-    4: 1,
+    1: 1,
+    2: 3,
+    4: 10,
 }
 
-SCALE_IN_THRESH = 0.4
-SCALE_IN_THRESH_INSTANT = 0.2
+SCALE_IN_THRESH = 0.7
 
 SCALE_OUT_WINDOW = 15
 SCALE_IN_WINDOW = 5
@@ -27,8 +26,10 @@ class AutoScaler:
         # These two metrics will be updated every time window
         self.timestamp_records: List[float] = []
 
-    def step(self, cache_usage) -> Optional[LiquidRequest]:
-        self.cache_usage_records.append(cache_usage) 
+        self.num_gpu_blocks_stack: List[int] = []
+
+    def step(self, concurrent_cache_usage,num_using_gpu_blocks) -> Optional[LiquidRequest]:
+        self.cache_usage_records.append(concurrent_cache_usage) 
         self.tp_level_records.append(self.current_tp_level)
         latest_timestamp = time.time()
         self.timestamp_records.append(latest_timestamp)
@@ -59,9 +60,15 @@ class AutoScaler:
         mean_value = np.mean(cache_usages)
 
         if mean_value < SCALE_IN_THRESH:
-            if cache_usage < SCALE_IN_THRESH_INSTANT:
+            if len(self.num_gpu_blocks_stack) < 2:
+                return None
+
+            if num_using_gpu_blocks < self.num_gpu_blocks_stack[-2]:
+                print(f"Currently using blocks: #{num_using_gpu_blocks} < previous gpu block: #{self.num_gpu_blocks_stack[-2]} ,decide to scale in!")
                 liquid_request = self._scale_in()
                 return liquid_request
+            else:
+                print(f"Try to scale in but currently using blocks #{num_using_gpu_blocks} > previous gpu blocks: {self.num_gpu_blocks_stack[-2]}")
         return None
 
     def _scale_in(self) -> Optional[LiquidRequest]:
