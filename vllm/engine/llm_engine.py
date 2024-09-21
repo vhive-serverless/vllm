@@ -221,8 +221,6 @@ class LLMEngine:
         self.liquid_config = liquid_config
         self.liquid_request_queue: Queue[LiquidRequest] = Queue() 
         self.execution_lock: threading.Lock = threading.Lock()
-        if liquid_config is not None:
-            self.auto_scaler = AutoScaler(liquid_config=liquid_config)
         self.request_output_queue: Queue[RequestOutput] = Queue()
 
         if not self.model_config.skip_tokenizer_init:
@@ -236,6 +234,9 @@ class LLMEngine:
         self.generation_config_fields = _load_generation_config_dict(
             model_config)
 
+        if liquid_config is not None:
+            self.auto_scaler = AutoScaler(liquid_config=liquid_config)
+
         self.model_executor = executor_class(
             model_config=model_config,
             cache_config=cache_config,
@@ -248,6 +249,8 @@ class LLMEngine:
             load_config=load_config,
             liquid_config=liquid_config,
         )
+
+        self.model_executor.num_gpu_blocks_stack = self.auto_scaler.num_gpu_blocks_stack
 
         if not self.model_config.embedding_mode:
             self._initialize_kv_caches()
@@ -768,17 +771,12 @@ class LLMEngine:
         if self.liquid_request_queue.qsize() != 0:
             liquid_request = self.liquid_request_queue.get()
             try:
-
-                # torch.cuda.memory._record_memory_history(max_entries=100000)
                 liquid_output = self._do_liquid(liquid_request)
                 logger.info(f"Finished liquid for {self.liquid_count} times, output: {liquid_output}, current mem info on GPU0: {get_cuda_mem_info()}, current gpu block: #{self.cache_config.num_gpu_blocks}")
                 self.liquid_count += 1
             except Exception as e:
                 logger.error(f"Failed to perform liquid! error: {e}, memory status: {get_cuda_mem_info()}, current gpu block: #{self.cache_config.num_gpu_blocks}")
                 raise Exception(e)
-                # torch.cuda.memory._record_memory_history(enabled=None)
-                # torch.cuda.memory._dump_snapshot(f"./torch_mem_dump.pickle")
-                # raise Exception(e)
 
     def step(self) -> List[Union[RequestOutput, EmbeddingRequestOutput]]:
         """Performs one decoding iteration and returns newly generated results.
@@ -832,10 +830,14 @@ class LLMEngine:
             >>>         break
         """
         # self.model_executor.delete_kv_cache()
-        cache_usage = self.get_latest_metrics().gpu_cache_usage
+        # current_cache_usage = self.get_latest_metrics().gpu_cache_usage
+        num_using_gpu_blocks = self.cache_config.num_gpu_blocks - self.scheduler.block_manager.get_num_free_gpu_blocks()
+        num_waiting_blocks = self.scheduler.get_waiting_num_tokens()
+        num_concurrent_blocks = num_using_gpu_blocks + num_waiting_blocks
+        concurrent_cache_usage = num_concurrent_blocks / self.cache_config.num_gpu_blocks
         liquid_request = None
         if self.liquid_config is not None:
-            liquid_request = self.auto_scaler.step(cache_usage)
+            liquid_request = self.auto_scaler.step(concurrent_cache_usage, num_using_gpu_blocks)
         if liquid_request is not None:
             self.liquid_request_queue.put(liquid_request)
 
