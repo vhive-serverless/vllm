@@ -56,8 +56,8 @@ class LiquidServer:
 
         command = [
                 './LLMLoadgen',
-                '-pattern', 'azure-code-50-5',
-                '-dataset', 'azure-code',
+                '-pattern', 'azure-conv-110-5',
+                '-dataset', 'azure-conv',
                 '-dst', 'liquid',
                 '-ip', 'localhost',
                 '-port', '8000',

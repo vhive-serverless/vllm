@@ -38,14 +38,32 @@ class AutoScaler:
         liquid_request = None
         # find out all records within scale-out window
         scale_out_records_index_window = []
-        for i, ts in enumerate(self.timestamp_records):
-            if latest_timestamp - ts < SCALE_OUT_WINDOW:
-                scale_out_records_index_window.append(i)
-        # find out all records within scale-in window 
         scale_in_records_index_window = []
-        for i, ts in enumerate(self.timestamp_records):
+        # iterate the list in reverse order to avoid iterating too many elements
+        for i in range(len(self.timestamp_records)):
+            index = (len(self.timestamp_records) - 1) - i
+            ts = self.timestamp_records[index]
+            if latest_timestamp - ts < SCALE_OUT_WINDOW:
+                scale_out_records_index_window.append(index)
+            else:
+                break
+        # for i, ts in enumerate(self.timestamp_records):
+        #     if latest_timestamp - ts < SCALE_OUT_WINDOW:
+        #         scale_out_records_index_window.append(i)
+        #     else:
+        #         break
+        # find out all records within scale-in window 
+        for i in range(len(self.timestamp_records)):
+            index = (len(self.timestamp_records) - 1) - i
+            ts = self.timestamp_records[index]
             if latest_timestamp - ts < SCALE_IN_WINDOW:
-                scale_in_records_index_window.append(i)
+                scale_in_records_index_window.append(index)
+            else:
+                break
+        # scale_in_records_index_window = []
+        # for i, ts in enumerate(self.timestamp_records):
+        #     if latest_timestamp - ts < SCALE_IN_WINDOW:
+        #         scale_in_records_index_window.append(i)
         # If the time window only contains one element, do not scale
         cache_usages = [self.cache_usage_records[i] for i in scale_out_records_index_window]
         cache_usages = np.array(cache_usages)

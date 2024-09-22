@@ -7,7 +7,7 @@ fi
 
 filename="/home/lrq/proj/vllm/liquid_server.py"
 
-newline="                '-pattern', 'azure-code-"
+newline="                '-pattern', 'azure-conv-"
 medium=$1
 suffix="-5',"
 content="${newline}${medium}${suffix}"
