@@ -3,7 +3,7 @@ run_experiment() {
     pattern=$1  # 第一个参数作为 pattern 传入
 
     # 拼接 newname
-    newname="code_${pattern}"
+    newname="conv_${pattern}"
 
     # 执行更改内容的脚本，传入 pattern
     /home/lrq/proj/vllm/change_content.sh $pattern
@@ -22,4 +22,10 @@ run_experiment() {
 # run_experiment 20
 # run_experiment 30
 # run_experiment 40
-run_experiment 50
+run_experiment 70
+run_experiment 80
+run_experiment 90
+run_experiment 100
+run_experiment 110
+run_experiment 120
+run_experiment 130
