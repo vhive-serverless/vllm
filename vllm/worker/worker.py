@@ -294,7 +294,8 @@ class Worker(WorkerBase):
         num_cpu_blocks = int(self.cache_config.swap_space_bytes //
                              cache_block_size)
         num_gpu_blocks = max(num_gpu_blocks, 0)
-        num_cpu_blocks = max(num_cpu_blocks, 0)
+        # num_cpu_blocks = max(num_cpu_blocks, 0)
+        num_cpu_blocks = 1
         if self.model_runner.lora_manager:
             self.model_runner.remove_all_loras()
         gc.collect()
