@@ -6,7 +6,8 @@ from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
                          ModelConfig, ParallelConfig, SchedulerConfig,
                          VisionLanguageConfig, LiquidConfig)
 from vllm.model_executor.model_loader.loader import (BaseModelLoader,
-                                                     get_model_loader)
+                                                     get_model_loader,
+                                                     ServerlessLLMLoader)
 from vllm.model_executor.model_loader.utils import (
     get_architecture_class_name, get_model_architecture)
 
@@ -19,15 +20,25 @@ def get_model(*, model_config: ModelConfig, load_config: LoadConfig,
               cache_config: CacheConfig,
               liquid_config: Optional[LiquidConfig]) -> nn.Module:
     loader = get_model_loader(load_config)
-    return loader.load_model(model_config=model_config,
-                             device_config=device_config,
-                             lora_config=lora_config,
-                             vision_language_config=vision_language_config,
-                             parallel_config=parallel_config,
-                             scheduler_config=scheduler_config,
-                             cache_config=cache_config,
-                             liquid_config = liquid_config,
-                             )
+    if isinstance(loader, ServerlessLLMLoader):
+        return loader.load_model(model_config=model_config,
+                                device_config=device_config,
+                                lora_config=lora_config,
+                                vision_language_config=vision_language_config,
+                                parallel_config=parallel_config,
+                                scheduler_config=scheduler_config,
+                                cache_config=cache_config,
+                                )
+    else:
+        return loader.load_model(model_config=model_config,
+                                device_config=device_config,
+                                lora_config=lora_config,
+                                vision_language_config=vision_language_config,
+                                parallel_config=parallel_config,
+                                scheduler_config=scheduler_config,
+                                cache_config=cache_config,
+                                liquid_config = liquid_config,
+                                )
 
 
 __all__ = [
