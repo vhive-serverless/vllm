@@ -45,6 +45,8 @@ from vllm.liquid.request import LiquidRequest, LiquidOutput, LiquidType
 from vllm.liquid.auto_scaler import AutoScaler
 from queue import Queue
 from vllm.liquid.utils import get_cuda_mem_info, get_gpu_processes_and_memory
+# from vllm.liquid.liquid_state import LIQUID_CONFIG
+import vllm.liquid.liquid_state as liquid_state
 
 logger = init_logger(__name__)
 _LOCAL_LOGGING_INTERVAL_SEC = 5
@@ -223,6 +225,9 @@ class LLMEngine:
         self.execution_lock: threading.Lock = threading.Lock()
         self.request_output_queue: Queue[RequestOutput] = Queue()
 
+        if liquid_config is not None:
+            liquid_state.LIQUID_CONFIG = liquid_config
+
         if not self.model_config.skip_tokenizer_init:
             self.tokenizer = self._init_tokenizer()
             self.detokenizer = Detokenizer(self.tokenizer)
@@ -249,8 +254,8 @@ class LLMEngine:
             load_config=load_config,
             liquid_config=liquid_config,
         )
-
-        self.model_executor.num_gpu_blocks_stack = self.auto_scaler.num_gpu_blocks_stack
+        if hasattr(self, "auto_scaler"):
+            self.model_executor.num_gpu_blocks_stack = self.auto_scaler.num_gpu_blocks_stack
 
         if not self.model_config.embedding_mode:
             self._initialize_kv_caches()
