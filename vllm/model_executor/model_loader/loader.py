@@ -867,7 +867,7 @@ class ServerlessLLMLoader(BaseModelLoader):
                    parallel_config: ParallelConfig,
                    scheduler_config: SchedulerConfig,
                    cache_config: CacheConfig) -> nn.Module:
-        from serverless_llm_store import load_dict
+        from serverless_llm_store.torch import load_dict
         from vllm.distributed import get_tensor_model_parallel_rank
         
         assert os.path.isdir(model_config.model)
@@ -935,7 +935,7 @@ class ServerlessLLMLoader(BaseModelLoader):
         max_size: Optional[int] = None,
     ) -> None:
         from vllm.distributed import get_tensor_model_parallel_rank
-        from serverless_llm_store import save_dict
+        from serverless_llm_store.torch import save_dict
         
         rank = get_tensor_model_parallel_rank()
         state_dict = ServerlessLLMLoader._filter_subtensors(model.state_dict())
