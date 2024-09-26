@@ -54,6 +54,8 @@ _PP_GLOBAL_RANKS: Optional[List[int]] = None
 
 _LOCAL_RANK = -1
 import time
+# from vllm.liquid.liquid_state import get_liquid_config, LIQUID_CONFIG
+import vllm.liquid.liquid_state as liquid_state
 
 
 class ActiveGroupManager:
@@ -77,7 +79,8 @@ class ActiveGroupManager:
         # self.gpu_groups[4] = torch.distributed.split_group(split_ranks=[[0,1,2,3]])
         torch.cuda.set_device(torch.device(f"cuda:{rank}"))
         self.init_group_and_comms(1)
-        self.init_group_and_comms(2)
+        if world_size > 1:
+            self.init_group_and_comms(2)
 
         if world_size > 2:
             self.init_group_and_comms(4)
@@ -237,13 +240,14 @@ def init_distributed_environment(
         if ACTIVE_GROUP_MANAGER is None or ACTIVE_GROUP_MANAGER._TP_DEVICE_GROUP is None:
             ACTIVE_GROUP_MANAGER = ActiveGroupManager(rank, world_size)
 
-        global LIQUID_COMMUNICATOR, TCP_STORE_PORT
-        LIQUID_COMMUNICATOR = LiquidCommunicator(
-            buffer_size_gb=0.5,
-            group=_DEVICE_WORLD_GROUP,
-            tcp_store_port=TCP_STORE_PORT,
-            dtype=dtype,
-        )
+        global LIQUID_COMMUNICATOR, TCP_STORE_PORT, LIQUID_CONFIG
+        if liquid_state.LIQUID_CONFIG is not None:
+            LIQUID_COMMUNICATOR = LiquidCommunicator(
+                buffer_size_gb=0.5,
+                group=_DEVICE_WORLD_GROUP,
+                tcp_store_port=TCP_STORE_PORT,
+                dtype=dtype,
+            )
         
 
 def initialize_model_parallel(

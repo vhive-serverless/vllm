@@ -29,6 +29,7 @@ from vllm.liquid.utils import send_dict, receive_dict
 import time
 from vllm.logger import logger
 from vllm.liquid.utils import get_cuda_mem_info
+import vllm.liquid.liquid_state as liquid_state
 
 
 class Worker(WorkerBase):
@@ -72,7 +73,7 @@ class Worker(WorkerBase):
             self.active_ranks = [0]
         if self.is_driver_worker:
             assert self.rank == 0, "The driver worker must have rank 0."
-
+        liquid_state.LIQUID_CONFIG = liquid_config
         if self.model_config.trust_remote_code:
             # note: lazy import to avoid importing torch before initializing
             from vllm.utils import init_cached_hf_modules
