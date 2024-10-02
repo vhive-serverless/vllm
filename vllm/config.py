@@ -1358,6 +1358,7 @@ class LiquidConfig:
     liquid_gpu_space: int
     liquid_driver_gpu_id: int
     liquid_total_num_shards: int
+    liquid_worker_id: int = 0
 
 @dataclass(frozen=True)
 class EngineConfig:

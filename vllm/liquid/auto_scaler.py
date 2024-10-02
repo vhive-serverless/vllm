@@ -5,7 +5,7 @@ import numpy as np
 import time
 
 SCALE_OUT_THRESH_MAP = {
-    1: 1,
+    1: 3,
     2: 3,
     4: 10,
 }
@@ -26,11 +26,14 @@ class AutoScaler:
         # These two metrics will be updated every time window
         self.timestamp_records: List[float] = []
 
+        self.bsz_records: List[int] = []
+
         self.num_gpu_blocks_stack: List[int] = []
 
-    def step(self, concurrent_cache_usage,num_using_gpu_blocks) -> Optional[LiquidRequest]:
+    def step(self, concurrent_cache_usage,num_using_gpu_blocks, metrics) -> Optional[LiquidRequest]:
         self.cache_usage_records.append(concurrent_cache_usage) 
         self.tp_level_records.append(self.current_tp_level)
+        self.bsz_records.append(metrics.num_running)
         latest_timestamp = time.time()
         self.timestamp_records.append(latest_timestamp)
 

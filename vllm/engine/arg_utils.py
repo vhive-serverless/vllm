@@ -47,7 +47,7 @@ class EngineArgs:
     swap_space: int = 4  # GiB
     gpu_memory_utilization: float = 0.90
     max_num_batched_tokens: Optional[int] = None
-    max_num_seqs: int = 256
+    max_num_seqs: int = 1024
     max_logprobs: int = 20  # Default value for OpenAI Chat Completions API
     disable_log_stats: bool = False
     revision: Optional[str] = None
@@ -106,6 +106,7 @@ class EngineArgs:
     liquid_gpu_space: Optional[int] = None
     liquid_driver_gpu_id: int = 0
     liquid_total_num_shards : Optional[int] = None
+    liquid_worker_id: int = 0
 
     def __post_init__(self):
         if self.tokenizer is None:
@@ -771,7 +772,8 @@ class EngineArgs:
         if self.liquid_gpu_range is None or self.liquid_gpu_space is None or self.liquid_total_num_shards is None:
             liquid_config = None
         else:
-            liquid_config = LiquidConfig(liquid_gpu_range=self.liquid_gpu_range, liquid_gpu_space=self.liquid_gpu_space, liquid_driver_gpu_id=self.liquid_driver_gpu_id, liquid_total_num_shards=self.liquid_total_num_shards)
+            liquid_config = LiquidConfig(liquid_gpu_range=self.liquid_gpu_range, liquid_gpu_space=self.liquid_gpu_space, liquid_driver_gpu_id=self.liquid_driver_gpu_id, liquid_total_num_shards=self.liquid_total_num_shards,
+                                         liquid_worker_id=self.liquid_worker_id)
             # liquid currently only supports mp backend
             parallel_config.distributed_executor_backend = "mp"
         return EngineConfig(model_config=model_config,
