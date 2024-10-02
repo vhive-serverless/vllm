@@ -836,13 +836,14 @@ class LLMEngine:
         """
         # self.model_executor.delete_kv_cache()
         # current_cache_usage = self.get_latest_metrics().gpu_cache_usage
+        metrics = self.get_latest_metrics()
         num_using_gpu_blocks = self.cache_config.num_gpu_blocks - self.scheduler.block_manager.get_num_free_gpu_blocks()
         num_waiting_blocks = self.scheduler.get_waiting_num_tokens()
         num_concurrent_blocks = num_using_gpu_blocks + num_waiting_blocks
         concurrent_cache_usage = num_concurrent_blocks / self.cache_config.num_gpu_blocks
         liquid_request = None
         if self.liquid_config is not None:
-            liquid_request = self.auto_scaler.step(concurrent_cache_usage, num_using_gpu_blocks)
+            liquid_request = self.auto_scaler.step(concurrent_cache_usage, num_using_gpu_blocks, metrics)
         if liquid_request is not None:
             self.liquid_request_queue.put(liquid_request)
 

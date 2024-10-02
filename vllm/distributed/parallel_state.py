@@ -144,7 +144,7 @@ class ActiveGroupManager:
         self._TP_CA_COMMUNICATOR = None
 
 ACTIVE_GROUP_MANAGER: Optional[ActiveGroupManager] = None
-TCP_STORE_PORT = 7001
+TCP_STORE_PORT_POOL = [7001,7002,7003,7004]
 LIQUID_COMMUNICATOR = None
 
 def get_liquid_communicator():
@@ -240,12 +240,13 @@ def init_distributed_environment(
         if ACTIVE_GROUP_MANAGER is None or ACTIVE_GROUP_MANAGER._TP_DEVICE_GROUP is None:
             ACTIVE_GROUP_MANAGER = ActiveGroupManager(rank, world_size)
 
-        global LIQUID_COMMUNICATOR, TCP_STORE_PORT, LIQUID_CONFIG
+        global LIQUID_COMMUNICATOR
         if liquid_state.LIQUID_CONFIG is not None:
+            tcp_store_port = TCP_STORE_PORT_POOL[liquid_state.LIQUID_CONFIG.liquid_worker_id]
             LIQUID_COMMUNICATOR = LiquidCommunicator(
                 buffer_size_gb=0.5,
                 group=_DEVICE_WORLD_GROUP,
-                tcp_store_port=TCP_STORE_PORT,
+                tcp_store_port=tcp_store_port,
                 dtype=dtype,
             )
         

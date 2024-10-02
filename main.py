@@ -5,9 +5,10 @@ import asyncio
 import torch
 
 import os
+import time
 
-# model = "meta-llama/Meta-Llama-3-8B"
-model = "facebook/opt-6.7b"
+model = "meta-llama/Meta-Llama-3-8B"
+# model = "facebook/opt-6.7b"
 # model_path = os.path.join("./models", model)
 
 def main():
@@ -15,21 +16,23 @@ def main():
         model, 
         enforce_eager=True,
         # load_format="auto",
-        # tensor_parallel_size=2,
-        # liquid_gpu_range = [0,1,2,3],
+        # tensor_parallel_size=4,
         liquid_gpu_range = [0,1,2,3],
         liquid_gpu_space = 32,
         liquid_driver_gpu_id = 0, 
         liquid_total_num_shards = 4,
+        distributed_executor_backend = 'mp',
+        enable_chunked_prefill= True,
+        max_num_batched_tokens = 1025,
 
     )
     sampling_params = SamplingParams(temperature=0, min_tokens=128, max_tokens=128)
-    request_num = 1
+    request_num = 64
     word = "what is LLM?" 
     prompt = word 
     inputs = [prompt for _ in range(request_num)]
 
-    for i in range(25):
+    for i in range(1):
         liquid_request = LiquidRequest(LiquidType.LIQUID_1_2)
         llm.do_liquid(liquid_request)
         liquid_request = LiquidRequest(LiquidType.LIQUID_2_4)
@@ -40,10 +43,19 @@ def main():
         llm.do_liquid(liquid_request)
 
 
-
+    start = time.time()
     output = llm.generate(inputs, sampling_params=sampling_params)
     print(f"output: {output[0].outputs[0].text}")
+    latency = time.time() - start
+    print(f"First time latency: {latency:.2f}s")
 
+    prompt = word * 1000
+    inputs = [prompt for _ in range(request_num)]
+    start = time.time()
+    output = llm.generate(inputs, sampling_params=sampling_params)
+    print(f"output: {output[0].outputs[0].text}")
+    latency = time.time() - start
+    print(f"Second time latency: {latency:.2f}s")
 
 
         
