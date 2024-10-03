@@ -20,17 +20,7 @@ def get_model(*, model_config: ModelConfig, load_config: LoadConfig,
               cache_config: CacheConfig,
               liquid_config: Optional[LiquidConfig]) -> nn.Module:
     loader = get_model_loader(load_config)
-    if isinstance(loader, ServerlessLLMLoader):
-        return loader.load_model(model_config=model_config,
-                                device_config=device_config,
-                                lora_config=lora_config,
-                                vision_language_config=vision_language_config,
-                                parallel_config=parallel_config,
-                                scheduler_config=scheduler_config,
-                                cache_config=cache_config,
-                                )
-    else:
-        return loader.load_model(model_config=model_config,
+    return loader.load_model(model_config=model_config,
                                 device_config=device_config,
                                 lora_config=lora_config,
                                 vision_language_config=vision_language_config,

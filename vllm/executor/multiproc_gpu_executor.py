@@ -399,6 +399,18 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
     def append_shards_weights(self, shard_ids: List[int], shards_weights):
         self._run_worker("append_shards_weights", shard_ids=shard_ids, shards_weights=shards_weights, rank=0)
 
+    def save_serverless_llm_state(
+        self,
+        path: str,
+        pattern: Optional[str] = None,
+        max_size: Optional[int] = None,
+    ) -> None:
+        self.driver_worker.save_serverless_llm_state(
+            path=path, pattern=pattern, max_size=max_size
+        )
+
+
+
 class MultiprocessingGPUExecutorAsync(MultiprocessingGPUExecutor,
                                       DistributedGPUExecutorAsync):
 

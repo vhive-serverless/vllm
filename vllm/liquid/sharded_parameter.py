@@ -2,6 +2,42 @@ import torch
 from torch.nn.parameter import Parameter
 from typing import List, Optional, Any, Dict
 
+def customize_cat(*tensors: torch.Tensor, dim: int) -> torch.Tensor:
+    # In place cat, old tensor at front, new tensor at back
+    if len(tensors) == 0:
+        raise ValueError("No tensors to concatenate")
+    new_shape = list(tensors[0].shape)
+    for tensor in tensors[1:]:
+        if tensor.dim() != tensors[0].dim():
+           raise ValueError("All tensors must have the same number of dimensions")
+        if tensor.device != tensors[0].device:
+            raise ValueError("All tensors must be on the same device")
+        if tensor.dtype != tensors[0].dtype:
+            raise ValueError("All tensors must have the same data")
+        for i in range(tensor.dim()):
+            if i != dim and tensor.size(i) != tensors[0].size(i):
+                raise ValueError("All tensors must have the same size in all dimensions except the concatenation dimension")
+        new_shape[dim] += tensor.size(dim)
+    new_data = torch.empty(
+        size=new_shape,
+        dtype=tensors[0].dtype,
+        device=tensors[0].device,
+    )
+    assert new_data.device == tensors[0].device
+    offset = 0
+    for tensor in tensors:
+        index = [slice(None)] * tensor.dim()
+        index[dim] = slice(offset, offset + tensor.size(dim))
+        if new_data[index].shape != tensor.shape:
+            raise ValueError(f"new_data[index].shape: {new_data[index].shape} is not equal to tensor.shape: {tensor.shape}")
+        if new_data[index].dtype != tensor.dtype:
+            raise ValueError(f"new_data[index].dtype: {new_data[index].dtype} is not equal to tensor.dtype: {tensor.dtype}")
+        if new_data[index].device != tensor.device:
+            raise ValueError(f"new_data[index].device: {new_data[index].device} is not equal to tensor.device: {tensor.device}")
+        new_data[index].copy_(tensor)
+        offset += tensor.size(dim)
+    return new_data
+
 
 class ShardedParameter(Parameter):
     def __new__(cls, data=None, requires_grad=False, num_shards=1, shard_dim=0, shard_ids=None, **kwargs):
@@ -64,15 +100,18 @@ class ShardedParameter(Parameter):
     def get_shards(self, start_shard_id: int, end_shard_id: int, shard_size: Optional[int] = None) -> torch.Tensor:
         shards = self._get_shards(self.data, start_shard_id, end_shard_id, shard_size)
         return shards
+    
+    
 
     def _delete_shards(self, tensor: torch.Tensor, start_shard_id: int, end_shard_id: int, shard_size: Optional[int]=None) -> torch.Tensor:
+        tensor.contiguous()
         index = self.shard_ids.index(start_shard_id)
         if shard_size is None:
             shard_size = self.shard_size
         start_index = index * shard_size
         before_shard = tensor.narrow(self.shard_dim, 0, start_index)
         after_shard = tensor.narrow(self.shard_dim, start_index + shard_size*(end_shard_id - start_shard_id), tensor.size(self.shard_dim) - start_index - shard_size*(end_shard_id - start_shard_id))
-        new_data = torch.cat([before_shard, after_shard], dim=self.shard_dim)
+        new_data = customize_cat(before_shard, after_shard, dim=self.shard_dim)
         return new_data
 
     def _delete_shard(self, tensor: torch.Tensor, shard_id: int, shard_size: Optional[int]=None) -> torch.Tensor:

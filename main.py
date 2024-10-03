@@ -7,8 +7,8 @@ import torch
 import os
 import time
 
-model = "meta-llama/Meta-Llama-3-8B"
-# model = "facebook/opt-6.7b"
+# model = "meta-llama/Meta-Llama-3-8B"
+model = "./models/facebook/opt-6.7b"
 # model_path = os.path.join("./models", model)
 
 def main():
@@ -22,8 +22,9 @@ def main():
         liquid_driver_gpu_id = 0, 
         liquid_total_num_shards = 4,
         distributed_executor_backend = 'mp',
-        enable_chunked_prefill= True,
-        max_num_batched_tokens = 1025,
+        # enable_chunked_prefill= True,
+        # max_num_batched_tokens = 1025,
+        load_format="serverless_llm",
 
     )
     sampling_params = SamplingParams(temperature=0, min_tokens=128, max_tokens=128)
@@ -35,12 +36,12 @@ def main():
     for i in range(1):
         liquid_request = LiquidRequest(LiquidType.LIQUID_1_2)
         llm.do_liquid(liquid_request)
-        liquid_request = LiquidRequest(LiquidType.LIQUID_2_4)
-        llm.do_liquid(liquid_request)
-        liquid_request = LiquidRequest(LiquidType.LIQUID_4_2)
-        llm.do_liquid(liquid_request)
-        liquid_request = LiquidRequest(LiquidType.LIQUID_2_1)
-        llm.do_liquid(liquid_request)
+        # liquid_request = LiquidRequest(LiquidType.LIQUID_2_4)
+        # llm.do_liquid(liquid_request)
+        # liquid_request = LiquidRequest(LiquidType.LIQUID_4_2)
+        # llm.do_liquid(liquid_request)
+        # liquid_request = LiquidRequest(LiquidType.LIQUID_2_1)
+        # llm.do_liquid(liquid_request)
 
 
     start = time.time()
@@ -49,13 +50,13 @@ def main():
     latency = time.time() - start
     print(f"First time latency: {latency:.2f}s")
 
-    prompt = word * 1000
-    inputs = [prompt for _ in range(request_num)]
-    start = time.time()
-    output = llm.generate(inputs, sampling_params=sampling_params)
-    print(f"output: {output[0].outputs[0].text}")
-    latency = time.time() - start
-    print(f"Second time latency: {latency:.2f}s")
+    # prompt = word * 1000
+    # inputs = [prompt for _ in range(request_num)]
+    # start = time.time()
+    # output = llm.generate(inputs, sampling_params=sampling_params)
+    # print(f"output: {output[0].outputs[0].text}")
+    # latency = time.time() - start
+    # print(f"Second time latency: {latency:.2f}s")
 
 
         

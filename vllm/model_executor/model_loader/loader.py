@@ -866,7 +866,9 @@ class ServerlessLLMLoader(BaseModelLoader):
                    vision_language_config: Optional[VisionLanguageConfig],
                    parallel_config: ParallelConfig,
                    scheduler_config: SchedulerConfig,
-                   cache_config: CacheConfig) -> nn.Module:
+                   cache_config: CacheConfig,
+                   liquid_config: Optional[LiquidConfig],
+                   ) -> nn.Module:
         from serverless_llm_store.torch import load_dict
         from vllm.distributed import get_tensor_model_parallel_rank
         
@@ -898,9 +900,14 @@ class ServerlessLLMLoader(BaseModelLoader):
         with set_default_torch_dtype(model_config.dtype):
             # with torch.device(device_config.device):
             with torch.device("cpu"):
-                model = _initialize_model(model_config, self.load_config,
+                if liquid_config is None:
+                    model = _initialize_model(model_config, self.load_config,
                                         lora_config, vision_language_config,
                                         cache_config)
+                else:
+                    shard_ids = list(range(liquid_config.liquid_total_num_shards))
+                    print(f"shard_ids: {shard_ids}")
+                    model = _initialize_sharded_model(model_config, self.load_config, lora_config, vision_language_config, cache_config, liquid_config, shard_ids)
                 model = model.eval()
             # set all parameters to meta device
             state_dict = self._filter_subtensors(model.state_dict())
