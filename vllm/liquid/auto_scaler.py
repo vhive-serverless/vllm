@@ -3,14 +3,18 @@ from vllm.config import LiquidConfig, CacheConfig
 from typing import List, Tuple, Dict, Optional
 import numpy as np
 import time
+import os
 
+SCALE_OUT_THRESH = float(os.getenv("SCALE_OUT_THRESH", 3))
+SCALE_IN_THRESH = float(os.getenv("SCALE_IN_THRESH", 0.7))
+# SCALE_OUT_THRESH = 3
 SCALE_OUT_THRESH_MAP = {
-    1: 3,
-    2: 3,
-    4: 3,
+    1: SCALE_OUT_THRESH,
+    2: SCALE_OUT_THRESH,
+    4: SCALE_OUT_THRESH,
 }
 
-SCALE_IN_THRESH = 0.7
+# SCALE_IN_THRESH = 0.7
 
 SCALE_OUT_WINDOW = 15
 SCALE_IN_WINDOW = 5
