@@ -843,7 +843,7 @@ class LLMEngine:
         concurrent_cache_usage = num_concurrent_blocks / self.cache_config.num_gpu_blocks
         liquid_request = None
         if self.liquid_config is not None:
-            liquid_request = self.auto_scaler.step(concurrent_cache_usage, num_using_gpu_blocks, metrics)
+            liquid_request = self.auto_scaler.step(concurrent_cache_usage, num_concurrent_blocks, num_using_gpu_blocks, metrics)
         if liquid_request is not None:
             self.liquid_request_queue.put(liquid_request)
 

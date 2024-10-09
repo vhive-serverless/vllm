@@ -35,8 +35,10 @@ class AutoScaler:
         self.num_gpu_blocks_stack: List[int] = []
 
         self.is_full_flag: bool = False # The flag is set to True when this instance has reached its liquid gpu range but still wants to scale out, will be set to False again when it is reported to global scaler
+        self.latest_num_concurrent_blocks = 0
 
-    def step(self, concurrent_cache_usage,num_using_gpu_blocks, metrics) -> Optional[LiquidRequest]:
+    def step(self, concurrent_cache_usage,num_concurrent_blocks, num_using_gpu_blocks, metrics) -> Optional[LiquidRequest]:
+        self.latest_num_concurrent_blocks = num_concurrent_blocks
         self.cache_usage_records.append(concurrent_cache_usage) 
         self.tp_level_records.append(self.current_tp_level)
         self.bsz_records.append(metrics.num_running)
