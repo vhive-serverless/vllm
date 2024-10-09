@@ -838,7 +838,7 @@ class LLMEngine:
         # current_cache_usage = self.get_latest_metrics().gpu_cache_usage
         metrics = self.get_latest_metrics()
         num_using_gpu_blocks = self.cache_config.num_gpu_blocks - self.scheduler.block_manager.get_num_free_gpu_blocks()
-        num_waiting_blocks = self.scheduler.get_waiting_num_tokens()
+        num_waiting_blocks = self.scheduler.get_waiting_num_tokens() // self.cache_config.block_size
         num_concurrent_blocks = num_using_gpu_blocks + num_waiting_blocks
         concurrent_cache_usage = num_concurrent_blocks / self.cache_config.num_gpu_blocks
         liquid_request = None
