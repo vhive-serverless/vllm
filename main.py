@@ -34,13 +34,13 @@ def main():
 
     for i in range(1):
         liquid_request = LiquidRequest(LiquidType.LIQUID_1_2)
-        llm.do_liquid(liquid_request)
+        llm.put_liquid_request(liquid_request)
         liquid_request = LiquidRequest(LiquidType.LIQUID_2_4)
-        llm.do_liquid(liquid_request)
+        llm.put_liquid_request(liquid_request)
         liquid_request = LiquidRequest(LiquidType.LIQUID_4_2)
-        llm.do_liquid(liquid_request)
+        llm.put_liquid_request(liquid_request)
         liquid_request = LiquidRequest(LiquidType.LIQUID_2_1)
-        llm.do_liquid(liquid_request)
+        llm.put_liquid_request(liquid_request)
 
 
     start = time.time()

@@ -5,7 +5,7 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
-from vllm.distributed import tensor_model_parallel_gather, gather_and_concat
+from vllm.distributed import tensor_model_parallel_gather, gather_and_concat, ca_tensor_model_parallel_gather
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 
 
@@ -67,7 +67,7 @@ class LogitsProcessor(nn.Module):
         if embedding_bias is not None:
             logits += embedding_bias
         # logits = gather_and_concat(logits)
-        logits = tensor_model_parallel_gather(logits)
+        logits = ca_tensor_model_parallel_gather(logits)
         # Remove paddings in vocab (if any).
         if logits is not None:
             logits = logits[:, :self.org_vocab_size]

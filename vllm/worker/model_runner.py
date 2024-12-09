@@ -103,6 +103,7 @@ class ModelRunner:
         self.is_driver_worker = is_driver_worker
         self.vision_language_config = vision_language_config
         self.liquid_config = liquid_config
+        self.driver_rank = liquid_config.liquid_driver_gpu_id
 
         self.device = self.device_config.device
         self.pin_memory = is_pin_memory_available()
@@ -762,11 +763,11 @@ class ModelRunner:
                 metadata_dict.update(attn_metadata.asdict_zerocopy())
             group = get_tensor_model_parallel_group()
             metadata_group = get_tensor_model_parallel_cpu_group()
-            broadcast_tensor_dict(metadata_dict, src=0, group=group, metadata_group=metadata_group)
+            broadcast_tensor_dict(metadata_dict, src=self.driver_rank, group=group, metadata_group=metadata_group)
         else:
             group = get_tensor_model_parallel_group()
             metadata_group = get_tensor_model_parallel_cpu_group()
-            metadata_dict = broadcast_tensor_dict(src=0, group=group, metadata_group=metadata_group)
+            metadata_dict = broadcast_tensor_dict(src=self.driver_rank, group=group, metadata_group=metadata_group)
             input_tokens = metadata_dict.pop("input_tokens")
             input_positions = metadata_dict.pop("input_positions")
             selected_token_indices = metadata_dict.pop(

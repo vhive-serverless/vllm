@@ -27,6 +27,7 @@ class GPUExecutor(ExecutorBase):
             self,
             local_rank: int = 0,
             rank: int = 0,
+            is_driver_worker: bool = False,
             distributed_init_method: Optional[str] = None) -> Dict[str, Any]:
         """Return worker init args for a given rank."""
         if distributed_init_method is None:
@@ -46,12 +47,13 @@ class GPUExecutor(ExecutorBase):
             lora_config=self.lora_config,
             vision_language_config=self.vision_language_config,
             speculative_config=self.speculative_config,
-            is_driver_worker=rank == 0,
+            is_driver_worker= is_driver_worker,
         )
 
     def _create_worker(self,
                        local_rank: int = 0,
                        rank: int = 0,
+                       is_driver_worker: bool = False,
                        distributed_init_method: Optional[str] = None):
 
         if self.speculative_config is None:
@@ -65,7 +67,7 @@ class GPUExecutor(ExecutorBase):
             worker_module_name=worker_module_name,
             worker_class_name=worker_class_name,
         )
-        wrapper.init_worker(**self._get_worker_kwargs(local_rank, rank,
+        wrapper.init_worker(**self._get_worker_kwargs(local_rank, rank,is_driver_worker,
                                                       distributed_init_method))
         return wrapper.worker
 

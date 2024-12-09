@@ -432,7 +432,7 @@ class AsyncLLMEngine:
         self._request_tracker.propagate_exception(exc)
 
     def do_liquid(self, shard_ids: List[int], src: int, dst: int ):
-        self.engine.do_liquid(shard_ids, src, dst)
+        self.engine.put_liquid_request(shard_ids, src, dst)
 
     async def get_tokenizer(self) -> "PreTrainedTokenizer":
         if self.engine_use_ray:

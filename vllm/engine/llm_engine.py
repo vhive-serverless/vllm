@@ -761,7 +761,7 @@ class LLMEngine:
                     self.request_output_handler.flush()
         return request_outputs
 
-    def do_liquid(self, liquid_request):
+    def put_liquid_request(self, liquid_request):
         self.liquid_request_queue.put(liquid_request)
 
     def _do_liquid(self, liquid_request: LiquidRequest) -> LiquidOutput:

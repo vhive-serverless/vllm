@@ -52,6 +52,7 @@ _CPU_WORLD_GROUP = None
 # source rank when broadcasting from the first or last pipeline stage.
 _PP_GLOBAL_RANKS: Optional[List[int]] = None
 
+DRIVER_RANK = -1
 _LOCAL_RANK = -1
 import time
 # from vllm.liquid.liquid_state import get_liquid_config, LIQUID_CONFIG
@@ -59,14 +60,17 @@ import vllm.liquid.liquid_state as liquid_state
 
 
 class ActiveGroupManager:
-    def __init__(self, rank:int, world_size: int) -> None:
+    def __init__(self, rank:int, world_size: int, driver_rank: int) -> None:
         self._TP_DEVICE_GROUP: Optional[ProcessGroup] = None
         self._TP_CPU_GROUP: Optional[ProcessGroup] = None
         self._TP_PYNCCL_COMMUNICATOR = None
         self._TP_CA_COMMUNICATOR = None
+        self.driver_rank = driver_rank
+        global DRIVER_RANK
+        DRIVER_RANK = driver_rank
 
         self.backend = "nccl"
-        self.active_ranks = [0]
+        self.active_ranks = [driver_rank]
         self.rank = rank
 
         self.gpu_groups = {}
@@ -78,16 +82,22 @@ class ActiveGroupManager:
         # self.gpu_groups[2] = torch.distributed.split_group(split_ranks=[[0,1]])
         # self.gpu_groups[4] = torch.distributed.split_group(split_ranks=[[0,1,2,3]])
         torch.cuda.set_device(torch.device(f"cuda:{rank}"))
-        self.init_group_and_comms(1)
-        if world_size > 1:
-            self.init_group_and_comms(2)
+        # self.init_group_and_comms(1)
+        # if world_size > 1:
+        #     self.init_group_and_comms(2)
 
-        if world_size > 2:
-            self.init_group_and_comms(4)
+        # if world_size > 2:
+        #     self.init_group_and_comms(4)
 
     def init_group_and_comms(self, tp_level: int):
         torch.cuda.set_device(torch.device(f"cuda:{self.rank}"))
-        ranks = list(range(tp_level))
+        # ranks = list(range(tp_level))
+        if tp_level == 1:
+            ranks = [2]
+        elif tp_level == 2:
+            ranks = [2,3]
+        elif tp_level == 4:
+            ranks = [0,1,2,3]
         group = torch.distributed.new_group(ranks=ranks, backend=self.backend)
         cpu_group = torch.distributed.new_group(ranks=ranks, backend="gloo")
         self.gpu_groups[tp_level] = group
@@ -116,20 +126,30 @@ class ActiveGroupManager:
         self.destroy_model_parallel()
 
         # # # whether rank is active, must execute this
-        # group = torch.distributed.new_group(ranks=active_ranks, backend=self.backend)
+        group = torch.distributed.new_group(ranks=active_ranks, backend=self.backend)
         # print(f"finished creating group for rank: {self.rank}")
-        group = self.gpu_groups[tp_level] 
-        cpu_group = self.cpu_groups[tp_level]
-        # cpu_group = torch.distributed.new_group(ranks=active_ranks, backend="gloo")
+        # group = self.gpu_groups[tp_level] 
+        # cpu_group = self.cpu_groups[tp_level]
+        cpu_group = torch.distributed.new_group(ranks=active_ranks, backend="gloo")
         # only active ranks need to execute following steps:
         if self.rank in self.active_ranks:
             self._TP_DEVICE_GROUP = group
             self._TP_CPU_GROUP = cpu_group 
 
-            self._TP_PYNCCL_COMMUNICATOR = self.tp_pynccl_comms[tp_level]
+            from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
+            self.tp_pynccl_comms[tp_level] = PyNcclCommunicator(
+                group=cpu_group,
+                device=_LOCAL_RANK,
+            )
+
+            # Initialize a custom fast all-reduce implementation.
             if _ENABLE_CUSTOM_ALL_REDUCE:
-                self._TP_CA_COMMUNICATOR = self.tp_ca_comms.get(tp_level, None)
-                # self._TP_CA_COMMUNICATOR = self.tp_ca_comms[tp_level]
+                from vllm.distributed.device_communicators.custom_all_reduce import (
+                    CustomAllreduce)
+                self.tp_ca_comms[tp_level] = CustomAllreduce(
+                    group=cpu_group,
+                    device=_LOCAL_RANK,
+                )
 
             
 
@@ -146,6 +166,10 @@ class ActiveGroupManager:
 ACTIVE_GROUP_MANAGER: Optional[ActiveGroupManager] = None
 TCP_STORE_PORT_POOL = [7001,7002,7003,7004]
 LIQUID_COMMUNICATOR = None
+
+def get_driver_rank():
+    global DRIVER_RANK
+    return DRIVER_RANK
 
 def get_liquid_communicator():
     global LIQUID_COMMUNICATOR
@@ -194,6 +218,7 @@ def init_distributed_environment(
     local_rank: int = -1,
     backend: str = "nccl",
     dtype: torch.dtype = torch.float,
+    driver_rank: int = 0,
 ):
     logger.debug(
         "world_size=%d rank=%d local_rank=%d "
@@ -238,7 +263,7 @@ def init_distributed_environment(
         del data
         global ACTIVE_GROUP_MANAGER
         if ACTIVE_GROUP_MANAGER is None or ACTIVE_GROUP_MANAGER._TP_DEVICE_GROUP is None:
-            ACTIVE_GROUP_MANAGER = ActiveGroupManager(rank, world_size)
+            ACTIVE_GROUP_MANAGER = ActiveGroupManager(rank, world_size, driver_rank)
 
         global LIQUID_COMMUNICATOR
         if liquid_state.LIQUID_CONFIG is not None:

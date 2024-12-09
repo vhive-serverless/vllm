@@ -524,8 +524,8 @@ class LLM:
                     lora_request, Sequence) else lora_request,
             )
 
-    def do_liquid(self, liquid_request):
-       self.llm_engine.do_liquid(liquid_request) 
+    def put_liquid_request(self, liquid_request):
+       self.llm_engine.put_liquid_request(liquid_request) 
 
     def _add_request(
         self,
