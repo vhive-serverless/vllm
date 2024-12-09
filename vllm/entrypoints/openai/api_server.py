@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 from http import HTTPStatus
 from typing import Optional, Set
 
+import time
+
 import fastapi
 import uvicorn
 from fastapi import Request
@@ -29,6 +31,9 @@ from vllm.entrypoints.openai.serving_completion import OpenAIServingCompletion
 from vllm.entrypoints.openai.serving_embedding import OpenAIServingEmbedding
 from vllm.logger import init_logger
 from vllm.usage.usage_lib import UsageContext
+
+
+import pdb
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 
@@ -57,7 +62,7 @@ async def lifespan(app: fastapi.FastAPI):
     yield
 
 
-app = fastapi.FastAPI(lifespan=lifespan)
+app = fastapi.FastAPI(lifespan=lifespan, debug=True)
 
 
 def parse_args():
@@ -70,6 +75,17 @@ route = Mount("/metrics", make_asgi_app())
 # Workaround for 307 Redirect for /metrics
 route.path_regex = re.compile('^/metrics(?P<path>.*)$')
 app.routes.append(route)
+
+# Siyu added
+@app.middleware("http")
+async def e2e_latency(request: Request, call_next):
+    """Middleware to measure end-to-end latency."""
+    start_time = time.time()
+    response = await call_next(request)
+    end_time = time.time()
+    latency = end_time - start_time
+    logger.info(f"Request {request.url.path} latency: {latency:.3f} seconds")
+    return response
 
 
 @app.exception_handler(RequestValidationError)
@@ -96,6 +112,59 @@ async def show_version():
     ver = {"version": vllm.__version__}
     return JSONResponse(content=ver)
 
+# Siyu added
+# @app.post("/v1/chat/completions")
+# async def create_chat_completion(request: ChatCompletionRequest,
+#                                  raw_request: Request):
+#     start_time = time.time()  # Start time of the request
+
+#     # To track TTFT
+#     first_token_time = None
+
+#     async def generator_with_timing():
+#         nonlocal first_token_time
+#         async for chunk in openai_serving_chat.create_chat_completion(
+#                 request, raw_request):
+#             if first_token_time is None:
+#                 first_token_time = time.time()  # Record TTFT
+#                 logger.info(
+#                     f"Request {raw_request.url.path} TTFT: {first_token_time - start_time:.3f} seconds"
+#                 )
+#             yield chunk
+
+#     generator = generator_with_timing()
+
+#     # Handle errors
+#     if isinstance(generator, ErrorResponse):
+#         return JSONResponse(content=generator.model_dump(),
+#                             status_code=generator.code)
+
+#     # Streamed response (TBT tracking)
+#     if request.stream:
+#         async def stream_with_tbt():
+#             previous_time = first_token_time
+#             async for chunk in generator:
+#                 current_time = time.time()
+#                 if previous_time:
+#                     tbt = current_time - previous_time
+#                     logger.info(
+#                         f"Request {raw_request.url.path} TBT: {tbt:.3f} seconds"
+#                     )
+#                 previous_time = current_time
+#                 yield chunk
+
+#         return StreamingResponse(content=stream_with_tbt(),
+#                                  media_type="text/event-stream")
+
+#     else:
+#         assert isinstance(generator, ChatCompletionResponse)
+#         end_time = time.time()
+#         latency = end_time - start_time
+#         logger.info(
+#             f"Request {raw_request.url.path} end-to-end latency: {latency:.3f} seconds"
+#         )
+#         return JSONResponse(content=generator.model_dump())
+
 
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest,
@@ -111,6 +180,56 @@ async def create_chat_completion(request: ChatCompletionRequest,
     else:
         assert isinstance(generator, ChatCompletionResponse)
         return JSONResponse(content=generator.model_dump())
+    
+# Siyu added
+# @app.post("/v1/completions")
+# async def create_completion(request: CompletionRequest, raw_request: Request):
+#     # Record the start time for TBT
+#     start_time = time.time()
+
+#     # Initiate completion request (asynchronous generator)
+#     generator = await openai_serving_completion.create_completion(
+#         request, raw_request)
+    
+#     if isinstance(generator, ErrorResponse):
+#         return JSONResponse(content=generator.model_dump(),
+#                             status_code=generator.code)
+
+#     # If streaming is enabled
+#     if request.stream:
+#         # Record TTFT as the time when the first token is generated/streamed
+#         first_token_time = None
+        
+#         async def stream_generator():
+#             nonlocal first_token_time
+#             async for item in generator:
+#                 if first_token_time is None:
+#                     first_token_time = time.time()  # Record time of first token
+#                 yield item
+
+#         # Streaming mode: directly pass the generator to the StreamingResponse
+#         return StreamingResponse(content=stream_generator(), media_type="text/event-stream")
+
+#     else:
+#         # Non-streaming mode: collect all data from the generator
+#         response_content = []
+#         first_token_time = None
+#         async for item in generator:
+#             response_content.append(item)
+#             if first_token_time is None:
+#                 first_token_time = time.time()  # Record time of first token
+
+#         # Calculate TBT (total batch time)
+#         total_time = time.time() - start_time  # Total time for the entire request
+
+#         # Calculate TTFT (time to first token)
+#         ttft = first_token_time - start_time if first_token_time else 0
+
+#         # Log or add the TTFT and TBT metrics
+#         print(f"TTFT: {ttft:.4f} seconds, TBT: {total_time:.4f} seconds")
+
+#         # Return the response content
+#         return JSONResponse(content=response_content)
 
 
 @app.post("/v1/completions")
@@ -125,7 +244,6 @@ async def create_completion(request: CompletionRequest, raw_request: Request):
                                  media_type="text/event-stream")
     else:
         return JSONResponse(content=generator.model_dump())
-
 
 @app.post("/v1/embeddings")
 async def create_embedding(request: EmbeddingRequest, raw_request: Request):
