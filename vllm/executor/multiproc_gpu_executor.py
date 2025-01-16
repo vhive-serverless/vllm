@@ -27,10 +27,8 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         # Create the parallel GPU workers.
         if self.liquid_config is None:
             world_size = self.parallel_config.tensor_parallel_size
-            self.driver_rank = 0
         else:
             world_size = len(self.liquid_config.liquid_gpu_range)
-            self.driver_rank = self.liquid_config.liquid_driver_gpu_id
 
         # Set CUDA_VISIBLE_DEVICES for the driver, inherited by workers
         if "CUDA_VISIBLE_DEVICES" not in os.environ:
@@ -49,7 +47,6 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
 
         distributed_init_method = get_distributed_init_method(
             get_ip(), get_open_port())
-        
 
         if world_size == 1 and self.liquid_config is None:
             self.workers = []
@@ -62,13 +59,6 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
                 worker_num = len(self.liquid_config.liquid_gpu_range)
                 non_driver_active = False
             result_handler = ResultHandler()
-            worker_ranks = list(range(worker_num))
-            other_worker_ranks = []
-            for r in worker_ranks:
-                if r != self.driver_rank:
-                    other_worker_ranks.append(r)
-            self.other_worker_ranks = other_worker_ranks
-
             self.workers = [
                 ProcessWorkerWrapper(
                     result_handler,
@@ -79,7 +69,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
                         distributed_init_method=distributed_init_method,
                     ),
                     is_active=non_driver_active,
-                    ) for rank in other_worker_ranks
+                    ) for rank in range(1, worker_num)
             ]
 
             self.worker_monitor = WorkerMonitor(self.workers, result_handler)
@@ -87,10 +77,10 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             self.worker_monitor.start()
 
         self.driver_worker = self._create_worker(
-            local_rank=self.driver_rank,rank=self.driver_rank,is_driver_worker=True,distributed_init_method=distributed_init_method)
+            distributed_init_method=distributed_init_method)
         self._run_workers("init_device")
         if self.liquid_config is not None:
-            self._run_workers("update_active_ranks", active_ranks=[self.driver_rank], only_active_workers=False)
+            self._run_workers("update_active_ranks", active_ranks=[0], only_active_workers=False)
         self._run_workers("load_model",
                           max_concurrent_workers=self.parallel_config.
                           max_parallel_loading_workers,
@@ -100,19 +90,15 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         if self.liquid_config is not None:
             driver_worker_info = LiquidWorkerInfo(
                 worker=self.driver_worker, 
-                rank=self.driver_rank,
+                rank=0,
                 shard_ids=list(range(self.liquid_config.liquid_total_num_shards)),
                 is_active=True,
                 initialized=True,
             )
-            self.rank_worker_info_map[self.driver_rank] = driver_worker_info
-            for rank in self.other_worker_ranks:
-                if rank < self.driver_rank:
-                    worker_index = rank
-                else:
-                    worker_index = rank - 1
+            self.rank_worker_info_map[0] = driver_worker_info
+            for rank in range(1, worker_num):
                 self.rank_worker_info_map[rank] = LiquidWorkerInfo(
-                    worker=self.workers[worker_index],
+                    worker=self.workers[rank-1],
                     rank=rank,
                     shard_ids=[],
                     is_active=False,
@@ -163,12 +149,12 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         liquid_type = liquid_request.liquid_type
         # scale out
         if liquid_type == LiquidType.LIQUID_1_2:
-            src = liquid_request.src_list[0]
-            dst = liquid_request.dst_list[0]
+            src = 0
+            dst = 1
             shard_ids = list(range(self.liquid_config.liquid_total_num_shards))
             moved_length = int(self.liquid_config.liquid_total_num_shards / 2)
             moved_shard_ids = shard_ids[moved_length:]
-            liquid_output = LiquidOutput(srcs=[src], dsts=[dst], shard_ids=moved_shard_ids, is_scale_out=True)
+            liquid_output = LiquidOutput(srcs=[0], dsts=[1], shard_ids=moved_shard_ids, is_scale_out=True)
             liquid_output.liquid_start = time.time()
             self.update_worker_info_map(src, dst, moved_shard_ids)
             active_ranks = self.get_active_ranks()
@@ -328,7 +314,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
     ) -> Any:
         """Runs the given method on one worker
         """
-        if rank == self.driver_rank:
+        if rank == 0:
             driver_worker_method = getattr(self.driver_worker, method)
             driver_worker_output = driver_worker_method(*args, **kwargs)
             return driver_worker_output
@@ -358,7 +344,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         workers = []
         if worker_ranks != None:
             for rank in worker_ranks:
-                if rank != self.driver_rank:
+                if rank != 0:
                     workers.append(self.get_worker_by_rank(rank))
         else:
             if only_active_workers:
@@ -378,7 +364,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             for worker in workers
         ]
 
-        if worker_ranks != None and self.driver_rank not in worker_ranks:
+        if worker_ranks != None and 0 not in worker_ranks:
             return [output.get() for output in worker_outputs]
 
         if async_run_remote_workers_only:

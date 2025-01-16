@@ -12,8 +12,6 @@ class LiquidType(Enum):
 @dataclass
 class LiquidRequest:
     liquid_type: LiquidType
-    src_list: List[int]
-    dst_list: List[int]
 
     def __repr__(self) -> str:
         liquid_type_str = ""

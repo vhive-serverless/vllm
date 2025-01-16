@@ -14,8 +14,6 @@ from .parallel_state import (get_device_world_group, get_cpu_world_group, get_pp
                              get_tp_ca_communicator,
                              get_tp_pynccl_communicator,
                              get_liquid_communicator,
-                             get_driver_rank,
-                             get_local_rank,
                              )
 
 
@@ -132,39 +130,6 @@ def tensor_model_parallel_all_gather(input_: torch.Tensor,
                                           input_size[dim + 1:])
     return output_tensor
 
-def ca_tensor_model_parallel_gather(input_: torch.Tensor,
-                                    dim: int = -1):
-    """Gather the input tensor across model parallel group.
-
-    NOTE: We assume that the input tensor is on the same device across
-    all the ranks.
-    """
-    driver_rank = get_driver_rank()
-    dst = driver_rank
-    world_size = get_tensor_model_parallel_world_size()
-    # Bypass the function if we are using only 1 GPU.
-    if world_size == 1:
-        return input_
-    assert -input_.dim() <= dim < input_.dim(), (
-        f"Invalid dim ({dim}) for input tensor with shape {input_.size()}")
-    if dim < 0:
-        # Convert negative dim to positive.
-        dim += input_.dim()
-    # Allocate output tensor.
-    if get_local_rank() == dst:
-        gather_list = [torch.empty_like(input_) for _ in range(world_size)]
-    else:
-        gather_list = None
-    # Gather.
-    torch.distributed.gather(input_,
-                             gather_list,
-                             dst=dst,
-                             group=get_tensor_model_parallel_group())
-    if get_local_rank() == dst:
-        output_tensor = torch.cat(gather_list, dim=dim)
-    else:
-        output_tensor = None
-    return output_tensor
 
 def tensor_model_parallel_gather(input_: torch.Tensor,
                                  dst: int = 0,

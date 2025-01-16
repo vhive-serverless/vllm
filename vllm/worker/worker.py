@@ -71,8 +71,8 @@ class Worker(WorkerBase):
         self.is_driver_worker = is_driver_worker
         if self.liquid_config is not None:
             self.active_ranks = [0]
-        # if self.is_driver_worker:
-        #     assert self.rank == 0, "The driver worker must have rank 0."
+        if self.is_driver_worker:
+            assert self.rank == 0, "The driver worker must have rank 0."
         liquid_state.LIQUID_CONFIG = liquid_config
         if self.model_config.trust_remote_code:
             # note: lazy import to avoid importing torch before initializing
@@ -82,7 +82,6 @@ class Worker(WorkerBase):
         if self.vision_language_config:
             assert not self.lora_config, (
                 "To be tested: vision language model with LoRA settings.")
-        self.driver_rank = self.liquid_config.liquid_driver_gpu_id
 
         ModelRunnerClass = (EmbeddingModelRunner if
                             self.model_config.embedding_mode else ModelRunner)
@@ -371,7 +370,7 @@ class Worker(WorkerBase):
             # execution loop.
             group = get_tensor_model_parallel_group()
             metadata_group = get_tensor_model_parallel_cpu_group()
-            broadcast_tensor_dict({}, src=self.driver_rank, group=group, metadata_group=metadata_group)
+            broadcast_tensor_dict({}, src=0, group=group, metadata_group=metadata_group)
             return []
 
         seq_group_metadata_list = execute_model_req.seq_group_metadata_list
@@ -399,7 +398,7 @@ class Worker(WorkerBase):
         group = get_tensor_model_parallel_group()
         metadata_group = get_tensor_model_parallel_cpu_group()
 
-        broadcast_tensor_dict(data, src=self.driver_rank,group=group, metadata_group=metadata_group)
+        broadcast_tensor_dict(data, src=0,group=group, metadata_group=metadata_group)
 
         self.cache_swap(blocks_to_swap_in, blocks_to_swap_out, blocks_to_copy)
 
@@ -435,7 +434,7 @@ class Worker(WorkerBase):
         assert not self.is_driver_worker
         group = get_tensor_model_parallel_group()
         metadata_group = get_tensor_model_parallel_cpu_group()
-        data = broadcast_tensor_dict(src=self.driver_rank, group=group, metadata_group=metadata_group)
+        data = broadcast_tensor_dict(src=0, group=group, metadata_group=metadata_group)
         if not data:
             return False
 
@@ -519,7 +518,7 @@ def init_worker_distributed_environment(
         world_size = len(liquid_config.liquid_gpu_range)
 
     init_distributed_environment(world_size,rank,
-                                 distributed_init_method, local_rank, dtype=dtype, driver_rank = liquid_config.liquid_driver_gpu_id)
+                                 distributed_init_method, local_rank, dtype=dtype)
     if liquid_config is None:
         ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                         parallel_config.pipeline_parallel_size,
