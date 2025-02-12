@@ -54,7 +54,7 @@ if not os.path.exists(_LATENCY_CSV_PATH):
     with open(_LATENCY_CSV_PATH, "w") as f:
         f.write("request_num, latency\n")
 
-
+# Logs the latency for each HTTP request by wrapping the response sending.
 class LatencyLoggingMiddleware:
     def __init__(self, app):
         self.app = app
