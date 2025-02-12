@@ -2,6 +2,8 @@ import asyncio
 import importlib
 import inspect
 import re
+import time
+import os
 from contextlib import asynccontextmanager
 from http import HTTPStatus
 from typing import Optional, Set
@@ -39,6 +41,45 @@ openai_serving_embedding: OpenAIServingEmbedding
 logger = init_logger('vllm.entrypoints.openai.api_server')
 
 _running_tasks: Set[asyncio.Task] = set()
+_request_counter = 0
+_counter_lock = asyncio.Lock()
+
+# Set CSV file path from $HOME/scratch/latency.csv
+_LATENCY_CSV_PATH = os.path.join(os.environ.get("HOME", ""), "scratch", "latency.csv")
+
+
+if not os.path.exists(os.path.dirname(_LATENCY_CSV_PATH)):
+    os.makedirs(os.path.dirname(_LATENCY_CSV_PATH), exist_ok=True)
+if not os.path.exists(_LATENCY_CSV_PATH):
+    with open(_LATENCY_CSV_PATH, "w") as f:
+        f.write("request_num, latency\n")
+
+
+class LatencyLoggingMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        start_time = time.time()
+        # Wrapper to capture end-of-response
+        async def send_wrapper(message):
+            if message["type"] == "http.response.body" and not message.get("more_body", False):
+                latency = time.time() - start_time
+                # Update global counter atomically
+                global _request_counter
+                async with _counter_lock:
+                    _request_counter += 1
+                    req_num = _request_counter
+                # Append to CSV file
+                with open(_LATENCY_CSV_PATH, "a") as f:
+                    f.write(f"{req_num}, {latency}\n")
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
 
 
 @asynccontextmanager
@@ -58,6 +99,7 @@ async def lifespan(app: fastapi.FastAPI):
 
 
 app = fastapi.FastAPI(lifespan=lifespan)
+app.add_middleware(LatencyLoggingMiddleware)
 
 
 def parse_args():
