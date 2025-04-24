@@ -129,6 +129,17 @@ class DistributedGPUExecutor(GPUExecutor):
                           pattern=pattern,
                           max_size=max_size)
 
+    def save_serverless_llm_state(
+        self,
+        path: str,
+        pattern: Optional[str] = None,
+        max_size: Optional[int] = None,
+    ) -> None:
+        self._run_workers("save_serverless_llm_state",
+                          path=path,
+                          pattern=pattern,
+                          max_size=max_size)
+        
     @abstractmethod
     def _driver_execute_model(
         self, execute_model_req: Optional[ExecuteModelRequest]
