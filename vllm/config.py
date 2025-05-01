@@ -2952,6 +2952,9 @@ class CompilationConfig(BaseModel):
         self.bs_to_padded_graph_size[
             self.max_capture_size] = self.max_capture_size
 
+@dataclass
+class LiquidConfig:
+    world_size: int
 
 @dataclass
 class VllmConfig:
@@ -2978,6 +2981,7 @@ class VllmConfig:
                                                   init=True)  # type: ignore
     kv_transfer_config: KVTransferConfig = field(default=None,
                                                  init=True)  # type: ignore
+    liquid_config: LiquidConfig = field(default=None, init=True) # type: ignore
     instance_id: str = ""
 
     def compute_hash(self) -> str:
@@ -3264,6 +3268,7 @@ class VllmConfig:
 
 
 _current_vllm_config: Optional[VllmConfig] = None
+
 
 
 @contextmanager
