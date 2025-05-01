@@ -21,15 +21,15 @@ logger = init_logger(__name__)
 
 class ProxyManager(DistributedGPUExecutor):
     
-    def __init__(self, world_size: int,*args, **kwargs):
-        self.world_size = world_size
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def _init_executor(self, world_size: int, ) -> None:
+    def _init_executor(self) -> None:
         self._check_executor_parameters()
 
         # Create the parallel GPU workers.
-        tensor_parallel_size = self.world_size
+        world_size = self.parallel_config.world_size
+        tensor_parallel_size = self.parallel_config.tensor_parallel_size
 
         # Set multiprocessing envs that are common to V0 and V1
         set_multiprocessing_worker_envs(self.parallel_config)
