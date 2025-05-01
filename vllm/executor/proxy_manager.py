@@ -1,13 +1,14 @@
 import asyncio
 import os
 from functools import partial
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Dict
+from queue import Queue
 
 from vllm.executor.distributed_gpu_executor import (  # yapf: disable
     DistributedGPUExecutor, DistributedGPUExecutorAsync)
 from vllm.executor.gpu_executor import create_worker
-from vllm.executor.multiproc_worker_utils import (
-    ProcessWorkerWrapper, ResultHandler, WorkerMonitor,
+from vllm.executor.proxy_manager_utils import (
+    GPUProxyWrapper, ResultHandler, WorkerMonitor,
     set_multiprocessing_worker_envs)
 from vllm.logger import init_logger
 from vllm.model_executor.layers.sampler import SamplerOutput
@@ -21,8 +22,11 @@ logger = init_logger(__name__)
 
 class ProxyManager(DistributedGPUExecutor):
     
-    def __init__(self, *args, **kwargs):
+    def __init__(self,task_queue_map:Dict[int, Queue], result_queue_map: Dict[int, Queue], *args, **kwargs):
+        self.task_queue_map:Dict[int, Queue] = task_queue_map
+        self.result_queue_map:Dict[int, Queue] = result_queue_map
         super().__init__(*args, **kwargs)
+        
 
     def _init_executor(self) -> None:
         self._check_executor_parameters()
@@ -40,22 +44,24 @@ class ProxyManager(DistributedGPUExecutor):
         distributed_init_method = get_distributed_init_method(
             "127.0.0.1", get_open_port())
 
-        self.workers: List[ProcessWorkerWrapper] = []
+        self.workers: List[GPUProxyWrapper] = []
         # This is the list of workers that are rank 0 of each TP group EXCEPT
         # global rank 0. These are the workers that will broadcast to the
         # rest of the workers.
-        self.tp_driver_workers: List[ProcessWorkerWrapper] = []
+        self.tp_driver_workers: List[GPUProxyWrapper] = []
         # This is the list of workers that are not drivers and not the first
         # worker in a TP group. These are the workers that will be
         # broadcasted to.
-        self.non_driver_workers: List[ProcessWorkerWrapper] = []
+        self.non_driver_workers: List[GPUProxyWrapper] = []
 
         if world_size == 1:
             self.worker_monitor = None
         else:
-            result_handler = ResultHandler()
             for rank in range(1, world_size):
-                worker = ProcessWorkerWrapper(
+                result_handler = ResultHandler()
+                worker = GPUProxyWrapper(
+                    self.task_queue_map[rank],
+                    self.result_queue_map[rank],
                     result_handler,
                     partial(
                         create_worker,

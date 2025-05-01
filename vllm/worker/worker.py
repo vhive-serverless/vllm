@@ -456,6 +456,10 @@ class Worker(LocalOrDistributedWorkerBase):
                                                 self.model_config,
                                                 self.parallel_config)
 
+    def print_args_and_return(self, index: int) -> str:
+        return f"passed index is: {index}"
+
+
 
 def init_worker_distributed_environment(
     vllm_config: VllmConfig,
