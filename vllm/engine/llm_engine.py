@@ -17,7 +17,7 @@ import vllm.envs as envs
 from vllm.config import (DecodingConfig, LoRAConfig, ModelConfig,
                          ObservabilityConfig, ParallelConfig, SchedulerConfig,
                          VllmConfig)
-from vllm.core.scheduler import (ScheduledSequenceroup, Scheduler,
+from vllm.core.scheduler import (ScheduledSequenceGroup, Scheduler,
                                  SchedulerOutputs)
 from vllm.engine.arg_utils import EngineArgs
 from vllm.engine.metrics_types import StatLoggerBase, Stats
