@@ -1336,8 +1336,10 @@ class UnloadLoraAdapterRequest(BaseModel):
     lora_int_id: Optional[int] = Field(default=None)
 
 class CreateInstanceRequest(BaseModel):
-    instance_uuid: str
-    gpu_ids: List[int]
+    uuid: str
+    cli: str
+    env: List[str]
+    args: List[str]
 
 class DeleteInstanceRequest(BaseModel):
     instance_uuid: str

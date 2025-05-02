@@ -23,6 +23,10 @@ task_queue_dict = mp_manager.dict()
 result_queue_dict = mp_manager.dict()
 lock_dict = mp_manager.dict()
 
+parser = FlexibleArgumentParser(
+    description="vLLM OpenAI-Compatible RESTful API server.")
+parser = make_arg_parser(parser)
+
 # This would be your real builder
 def build_proxy_manager(world_size: int, vllm_config: VllmConfig, mp_manager: SyncManager) -> ProxyManager:
     logger.info("Building Proxy Manager")
@@ -47,22 +51,29 @@ def build_proxy_manager(world_size: int, vllm_config: VllmConfig, mp_manager: Sy
 # Server setup
 app = FastAPI()
 
-# @app.on_event("startup")
-# def startup_event():
-#     global proxy_manager
-#     proxy_manager = build_proxy_manager()
 
 @app.post("/create_instance")
 def create_instance(req: CreateInstanceRequest):
     global proxy_manager, mp_manager, task_queue_dict, result_queue_dict, lock_dict
     # proxy_manager.create_instance(req.uuid, req.gpu_ids)
     # A test process that enqueue items into task queue
-    rank = 1
-    index = 6
-    p = Process(target=test_process, args=(task_queue_dict, result_queue_dict, lock_dict, req.instance_uuid, rank, index)) 
-    p.start()
-    p.join()
-    return {"status": "created", "uuid": req.instance_uuid}
+    instance_uuid = req.uuid
+    cli = req.cli
+    envs = req.env
+    args = req.args
+    # Find the cuda visible devices
+    gpu_ids = []
+    prefix = "CUDA_VISIBLE_DEVICES="
+    for env in envs:
+        if env.startswith(prefix):
+            visible_devices_str_list = env.removeprefix(prefix).split(',')
+            gpu_ids = [int(d) for d in visible_devices_str_list]
+    assert len(gpu_ids) != 0, f"Didn't specify CUDA_VISIBLE_DEVICES in the create request!"
+    assert "serve" in args
+    args = ["--model" if arg == "serve" else arg for arg in args]
+    args = parser.parse_args(args)
+    print(args)
+    return {"status": "created", "uuid": req.uuid}
 
 def test_process(task_queue_dict:Dict[int, Queue], result_queue_dict:Dict[int, Queue], lock_dict:Dict[int, any], instance_uuid: str, rank: int, index: int):
     global world_size

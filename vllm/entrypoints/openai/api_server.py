@@ -761,6 +761,10 @@ async def run_server(args, **uvicorn_kwargs) -> None:
 
     sock.close()
 
+def start_openai_api_server(args):
+    validate_parsed_serve_args(args)
+    uvloop.run(run_server(args))
+
 
 if __name__ == "__main__":
     # NOTE(simon):
@@ -769,6 +773,4 @@ if __name__ == "__main__":
         description="vLLM OpenAI-Compatible RESTful API server.")
     parser = make_arg_parser(parser)
     args = parser.parse_args()
-    validate_parsed_serve_args(args)
-
-    uvloop.run(run_server(args))
+    start_openai_api_server(args)
