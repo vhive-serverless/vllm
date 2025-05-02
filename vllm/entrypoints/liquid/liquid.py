@@ -73,6 +73,9 @@ def create_instance(req: CreateInstanceRequest):
     args = ["--model" if arg == "serve" else arg for arg in args]
     args = parser.parse_args(args)
     print(args)
+
+    # First let the proxy manager adjust tensor model parallel groups
+    proxy_manager.create_instance(instance_uuid, gpu_ids)
     return {"status": "created", "uuid": req.uuid}
 
 def test_process(task_queue_dict:Dict[int, Queue], result_queue_dict:Dict[int, Queue], lock_dict:Dict[int, any], instance_uuid: str, rank: int, index: int):

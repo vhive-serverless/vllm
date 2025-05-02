@@ -10,6 +10,7 @@ import vllm.envs as envs
 from vllm.config import VllmConfig
 from vllm.distributed import (ensure_kv_transfer_initialized,
                               ensure_model_parallel_initialized,
+                              initialize_tensor_parallel_group,
                               init_distributed_environment,
                               set_custom_all_reduce)
 from vllm.logger import init_logger
@@ -184,6 +185,17 @@ class GPUProxy(LocalOrDistributedWorkerBase):
     ) -> None:
         self.model_runner.save_tensorized_model(
             tensorizer_config=tensorizer_config, )
+
+    def init_tensor_parallel_group(
+            self,
+            instance_uuid: str,
+            group_ranks: List[int],
+    ) -> None:
+        initialize_tensor_parallel_group(
+            group_name=f"tp_{instance_uuid}",
+            group_ranks=group_ranks
+        )
+        
 
     @torch.inference_mode()
     def determine_num_available_blocks(self) -> Tuple[int, int]:

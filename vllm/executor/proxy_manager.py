@@ -22,11 +22,12 @@ logger = init_logger(__name__)
 class ProxyManager(DistributedGPUExecutor):
     
     def __init__(self,task_queue_map:Dict[int, Queue], result_queue_map: Dict[int, Queue], *args, **kwargs):
+        vllm_config = args[0]
+        vllm_config.parallel_config.worker_cls = "vllm.worker.gpu_proxy.GPUProxy"
         self.task_queue_map:Dict[int, Queue] = task_queue_map
         self.result_queue_map:Dict[int, Queue] = result_queue_map
         super().__init__(*args, **kwargs)
         # change worker class to gpu proxy
-        self.vllm_config.parallel_config.worker_cls = "vllm.worker.gpu_proxy.GPUProxy"
         
 
     def _init_executor(self) -> None:
@@ -164,7 +165,10 @@ class ProxyManager(DistributedGPUExecutor):
             result.get()
 
     def create_instance(self, uuid: str, gpu_ids: List[int]):
-        raise NotImplementedError
+        # Create group for this specific instance
+        logger.info(f"gpu_ids: {gpu_ids}")
+        self._run_workers("init_tensor_parallel_group", instance_uuid=uuid, group_ranks=[gpu_ids])
+        logger.info(f"Group for instance: {uuid} is created!")
 
     def delete_instance(self, uuid: str):
         raise NotImplementedError

@@ -988,6 +988,19 @@ def init_distributed_environment(
         assert _WORLD.world_size == torch.distributed.get_world_size(), (
             "world group already initialized with a different world size")
 
+def initialize_tensor_parallel_group(
+        group_name: str,
+        group_ranks: List[int],
+        backend: Optional[str] = None,
+):
+    global _TP
+    backend = backend or torch.distributed.get_backend(
+        get_world_group().device_group)
+    _TP = init_model_parallel_group(group_ranks,
+                                    get_world_group().local_rank,
+                                    backend,
+                                    use_message_queue_broadcaster=True,
+                                    group_name=group_name)
 
 def initialize_model_parallel(
     tensor_model_parallel_size: int = 1,
