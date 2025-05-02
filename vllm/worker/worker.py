@@ -456,8 +456,11 @@ class Worker(LocalOrDistributedWorkerBase):
                                                 self.model_config,
                                                 self.parallel_config)
 
-    def print_args_and_return(self, index: int) -> str:
-        return f"passed index is: {index}"
+    def print_args_and_return(self, *args, **kwargs) -> str:
+        result_str = ""
+        for i, arg in enumerate(args):
+            result_str += f"arg{i}: {arg};"
+        return result_str
 
 
 

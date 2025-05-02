@@ -5,18 +5,19 @@ import sys
 import threading
 import uuid
 from dataclasses import dataclass
-from multiprocessing import Queue
+from multiprocessing import Queue, Process
+from multiprocessing.synchronize import Lock
 from multiprocessing.connection import wait
 from multiprocessing.process import BaseProcess
 from typing import (Any, Callable, Dict, Generic, List, Optional, TextIO,
                     TypeVar, Union)
 
-import torch
 
 import vllm.envs as envs
 from vllm.logger import init_logger
 from vllm.triton_utils.importing import HAS_TRITON
 from vllm.utils import cuda_is_initialized
+from vllm.executor.multiproc_worker_utils import _add_prefix, get_mp_context, Result, ResultFuture, ResultHandler, ProcessWorkerWrapper
 
 if HAS_TRITON:
     from vllm.triton_utils import maybe_set_triton_cache_manager
@@ -26,6 +27,7 @@ logger = init_logger(__name__)
 T = TypeVar('T')
 
 _TERMINATE = "TERMINATE"  # sentinel
+_MANAGER_INSTANCE_UUID = "proxy_manager"
 
 # ANSI color codes
 CYAN = '\033[1;36m'
@@ -33,138 +35,105 @@ RESET = '\033[0;0m'
 
 JOIN_TIMEOUT_S = 2
 
+@dataclass
+class GPUProxyTask:
+    instance_uuid: str # src instance uuid
+    task_id: uuid.UUID # uuid for task
+    method: str # function that is to be executed on the gpu proxy side
+    args: List[Any] # arguments passed to the method
+    kwargs: Dict[Any, Any]
 
 @dataclass
-class Result(Generic[T]):
+class GPUProxyResult(Result):
     """Result of task dispatched to worker"""
-
-    task_id: uuid.UUID
-    value: Optional[T] = None
-    exception: Optional[BaseException] = None
+    instance_uuid: str = ""
 
 
-class ResultFuture(threading.Event, Generic[T]):
-    """Synchronous future for non-async case"""
 
-    def __init__(self):
-        super().__init__()
-        self.result: Optional[Result[T]] = None
+class GPUProxyClient:
+    def __init__(self, gpu_id: int, task_queue: Queue, result_queue: Queue, lock: Lock, instance_uuid: str):
+        self.gpu_id = gpu_id
+        self.task_queue = task_queue
+        self.result_queue = result_queue
+        self.lock = lock
+        self._has_lock = False
+        self.instance_uuid = instance_uuid
+        self.task_map: Dict[uuid.UUID, ResultFuture] = {}
+        self.result_listener = threading.Thread(target=self._result_listener)
 
-    def set_result(self, result: Result[T]):
-        self.result = result
-        self.set()
+    def start(self):
+        # Try to acquire the lock
+        self.__acquire()
+        self.result_listener.start()
 
-    def get(self) -> T:
-        self.wait()
-        assert self.result is not None
-        if self.result.exception is not None:
-            raise self.result.exception
-        return self.result.value  # type: ignore[return-value]
+    def stop(self):
+        self.result_queue.put(None)
+        self.__release()
 
+    def __acquire(self):
+        logger.info(f"{os.getpid()} try to acquire lock for gpu: {self.gpu_id}...")
+        self.lock.acquire()
+        self._has_lock = True
+        logger.info(f"{os.getpid()} acquired lock for gpu: {self.gpu_id}!")
+        # register instance 
 
-def _set_future_result(future: Union[ResultFuture, asyncio.Future],
-                       result: Result):
-    if isinstance(future, ResultFuture):
-        future.set_result(result)
-        return
-    loop = future.get_loop()
-    if not loop.is_closed():
-        if result.exception is not None:
-            loop.call_soon_threadsafe(future.set_exception, result.exception)
-        else:
-            loop.call_soon_threadsafe(future.set_result, result.value)
+    def __release(self):
+        if self._has_lock:
+            self.lock.release()
+            self._has_lock = False
+            logger.info(f"{os.getpid()} released lock for gpu: {self.gpu_id}!")
 
+    def execute_method(self, method: str, *args, **kwargs) -> Generic[T]:
+        # Execute a function remotely in GPUProxy, this is a sync function
+        assert self._has_lock, f"{os.getpid()} haven't acquired the lock for gpu: {self.gpu_id}"
+        task_id = uuid.uuid4()
+        task = GPUProxyTask(
+            instance_uuid=self.instance_uuid,
+            task_id=task_id,
+            method=method,
+            args=args,
+            kwargs=kwargs,
+        )
+        self.task_queue.put(task)
+        # Register the task's future
+        self.task_map[task_id] = ResultFuture()
+        output = self.task_map[task_id].get()
+        # Get the result, deregister the future
+        self.task_map.pop(task_id) 
+        return output
 
-class ResultHandler(threading.Thread):
-    """Handle results from all workers (in background thread)"""
-
-    def __init__(self) -> None:
-        super().__init__(daemon=True)
-        self.result_queue = get_mp_context().Queue()
-        self.tasks: Dict[uuid.UUID, Union[ResultFuture, asyncio.Future]] = {}
-
-    def run(self):
+    def _result_listener(self):
+        assert self._has_lock, f"{os.getpid()} haven't acquired the lock for gpu: {self.gpu_id}"
         for result in iter(self.result_queue.get, _TERMINATE):
-            logger.info(f"Result: {result}")
-            if not isinstance(result, Result):
-                continue
-            future = self.tasks.pop(result.task_id)
-            _set_future_result(future, result)
-        # Ensure that all waiters will receive an exception
-        for task_id, future in self.tasks.items():
-            _set_future_result(
-                future,
-                Result(task_id=task_id,
-                       exception=ChildProcessError("worker died")))
+            if result is None:  # Sentinel value to terminate
+                logger.info(f"Received shutdown signal for GPUProxyClient: {self.gpu_id}")
+                break
+            assert isinstance(result, GPUProxyResult), f"Got unexpected result from result queue! Result type:{type(result)}"
+            assert result.instance_uuid == self.instance_uuid, f"Got result from instance {result.instance_uuid}, however, current instance's uuid: {self.instance_uuid}"
+            assert result.task_id in self.task_map, f"Got unregistered result! Result's task_id: {result.task_id}"
+            self.task_map[result.task_id].set_result(result)
 
-    def close(self):
-        self.result_queue.put(_TERMINATE)
+        logger.info(f"Exit result listener for GPUProxyClient: {self.gpu_id}")
 
 
-class WorkerMonitor(threading.Thread):
-    """Monitor worker status (in background thread)"""
-
-    def __init__(self, workers: List['ProcessWorkerWrapper'],
-                 result_handler: ResultHandler):
-        super().__init__(daemon=True)
-        self.workers = workers
-        self.result_handler = result_handler
-        self._close = False
-
-    def run(self) -> None:
-        # Blocks until any worker exits
-        dead_sentinels = wait([w.process.sentinel for w in self.workers])
-        if not self._close:
-            self._close = True
-
-            # Kill / cleanup all workers
-            for worker in self.workers:
-                process = worker.process
-                if process.sentinel in dead_sentinels:
-                    process.join(JOIN_TIMEOUT_S)
-                if process.exitcode is not None and process.exitcode != 0:
-                    logger.error("Worker %s pid %s died, exit code: %s",
-                                 process.name, process.pid, process.exitcode)
-            # Cleanup any remaining workers
-            if logger:
-                logger.info("Killing local vLLM worker processes")
-            for worker in self.workers:
-                worker.kill_worker()
-            # Must be done after worker task queues are all closed
-            self.result_handler.close()
-
-        for worker in self.workers:
-            worker.process.join(JOIN_TIMEOUT_S)
-
-    def close(self):
-        if self._close:
-            return
-        self._close = True
-        logger.info("Terminating local vLLM worker processes")
-        for worker in self.workers:
-            worker.terminate_worker()
-        # Must be done after worker task queues are all closed
-        self.result_handler.close()
-
-
-class GPUProxyWrapper:
+class GPUProxyManagerClient(ProcessWorkerWrapper): # Used for the proxy manager to send ctrl messages internally
     """Local process wrapper for vllm.worker.Worker,
     for handling single-node multi-GPU tensor parallel."""
 
-    def __init__(self, task_queue: Queue, external_result_queue: Queue, result_handler: ResultHandler,
+    def __init__(self, task_queue: Queue, external_result_queue: Queue, manager_result_handler: ResultHandler,
                  worker_factory: Callable[[], Any]) -> None:
         self.mp = get_mp_context()
         self._task_queue = task_queue
         self.external_result_queue = external_result_queue
-        self.result_queue = result_handler.result_queue
-        self.tasks = result_handler.tasks
+        self.manager_result_queue = manager_result_handler.result_queue
+        self.tasks = manager_result_handler.tasks
         self.process: BaseProcess = self.mp.Process(  # type: ignore[attr-defined]
-            target=_run_worker_process,
-            name="VllmWorkerProcess",
+            target=_run_gpu_proxy_process,
+            name="GPUProxyProcess",
             kwargs=dict(
                 worker_factory=worker_factory,
                 task_queue=self._task_queue,
-                result_queue=self.result_queue,
+                manager_result_queue=self.manager_result_queue,
                 external_result_queue=self.external_result_queue,
             ),
             daemon=True)
@@ -176,39 +145,26 @@ class GPUProxyWrapper:
         task_id = uuid.uuid4()
         self.tasks[task_id] = future
         try:
-            self._task_queue.put((task_id, method, args, kwargs))
+            task = GPUProxyTask(
+                instance_uuid=_MANAGER_INSTANCE_UUID,
+                task_id=task_id,
+                method=method,
+                args=args,
+                kwargs=kwargs
+            )
+            self._task_queue.put(task)
         except SystemExit:
             raise
         except BaseException as e:
             del self.tasks[task_id]
             raise ChildProcessError("worker died") from e
 
-    def execute_method(self, method: str, *args, **kwargs):
-        future: ResultFuture = ResultFuture()
-        self._enqueue_task(future, method, args, kwargs)
-        return future
-
-    async def execute_method_async(self, method: str, *args, **kwargs):
-        future = asyncio.get_running_loop().create_future()
-        self._enqueue_task(future, method, args, kwargs)
-        return await future
-
-    def terminate_worker(self):
-        try:
-            self._task_queue.put(_TERMINATE)
-        except ValueError:
-            self.process.kill()
-        self._task_queue.close()
-
-    def kill_worker(self):
-        self._task_queue.close()
-        self.process.kill()
 
 
-def _run_worker_process(
+def _run_gpu_proxy_process(
     worker_factory: Callable[[], Any],
     task_queue: Queue,
-    result_queue: Queue,
+    manager_result_queue: Queue,
     external_result_queue: Queue,
 ) -> None:
     """Worker process event loop"""
@@ -227,15 +183,15 @@ def _run_worker_process(
     # and return task output in result_queue
     logger.info("Worker ready; awaiting tasks")
     try:
-        for items in iter(task_queue.get, _TERMINATE):
-            logger.info(f"Get item: {items} from task queue")
+        for task in iter(task_queue.get, _TERMINATE):
+            assert isinstance(task, GPUProxyTask)
             output = None
             exception = None
-            instance_uuid = "proxy_manager"
-            if len(items) == 5:
-                instance_uuid, task_id, method, args, kwargs = items
-            else:
-                task_id, method, args, kwargs = items
+            instance_uuid = task.instance_uuid
+            task_id = task.task_id
+            method = task.method
+            args = task.args
+            kwargs = task.kwargs
             try:
                 executor = getattr(worker, method)
                 output = executor(*args, **kwargs)
@@ -248,11 +204,11 @@ def _run_worker_process(
                     "Exception in worker %s while processing method %s.",
                     process_name, method)
                 exception = e
-            if instance_uuid != "proxy_manager":
-                external_result_queue.put((instance_uuid, task_id, output, exception))
+            result = GPUProxyResult(task_id, output, exception, instance_uuid)
+            if instance_uuid != _MANAGER_INSTANCE_UUID:
+                external_result_queue.put(result)
             else:
-                result_queue.put(
-                    Result(task_id=task_id, value=output, exception=exception))
+                manager_result_queue.put(result)
     except KeyboardInterrupt:
         pass
     except Exception:
@@ -260,77 +216,3 @@ def _run_worker_process(
 
     logger.info("Worker exiting")
 
-
-def _add_prefix(file: TextIO, worker_name: str, pid: int) -> None:
-    """Prepend each output line with process-specific prefix"""
-
-    prefix = f"{CYAN}({worker_name} pid={pid}){RESET} "
-    file_write = file.write
-
-    def write_with_prefix(s: str):
-        if not s:
-            return
-        if file.start_new_line:  # type: ignore[attr-defined]
-            file_write(prefix)
-        idx = 0
-        while (next_idx := s.find('\n', idx)) != -1:
-            next_idx += 1
-            file_write(s[idx:next_idx])
-            if next_idx == len(s):
-                file.start_new_line = True  # type: ignore[attr-defined]
-                return
-            file_write(prefix)
-            idx = next_idx
-        file_write(s[idx:])
-        file.start_new_line = False  # type: ignore[attr-defined]
-
-    file.start_new_line = True  # type: ignore[attr-defined]
-    file.write = write_with_prefix  # type: ignore[method-assign]
-
-
-def _check_multiproc_method():
-    if (cuda_is_initialized()
-            and os.environ.get("VLLM_WORKER_MULTIPROC_METHOD") != "spawn"):
-        logger.warning("CUDA was previously initialized. We must use "
-                       "the `spawn` multiprocessing start method. Setting "
-                       "VLLM_WORKER_MULTIPROC_METHOD to 'spawn'. "
-                       "See https://docs.vllm.ai/en/latest/getting_started/"
-                       "debugging.html#python-multiprocessing "
-                       "for more information.")
-        os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
-
-
-def get_mp_context():
-    _check_multiproc_method()
-    mp_method = envs.VLLM_WORKER_MULTIPROC_METHOD
-    return multiprocessing.get_context(mp_method)
-
-
-def set_multiprocessing_worker_envs(parallel_config):
-    """ Set up environment variables that should be used when there are workers
-    in a multiprocessing environment. This should be called by the parent 
-    process before worker processes are created"""
-
-    _check_multiproc_method()
-
-    # Configure thread parallelism if OMP_NUM_THREADS isn't set
-    #
-    # Helps to avoid CPU contention. The default of spawning a thread per
-    # core combined with multiprocessing for each GPU can have a negative
-    # impact on performance. The contention is amplified when running in a
-    # container where CPU limits can cause throttling.
-    default_omp_num_threads = 1
-    if "OMP_NUM_THREADS" not in os.environ and (
-            current_parallelism :=
-            torch.get_num_threads()) > default_omp_num_threads:
-        logger.warning(
-            "Reducing Torch parallelism from %d threads to %d to avoid "
-            "unnecessary CPU contention. Set OMP_NUM_THREADS in the "
-            "external environment to tune this value as needed.",
-            current_parallelism, default_omp_num_threads)
-        os.environ["OMP_NUM_THREADS"] = str(default_omp_num_threads)
-        torch.set_num_threads(default_omp_num_threads)
-
-    # workaround for https://github.com/vllm-project/vllm/issues/6103
-    if HAS_TRITON and parallel_config.world_size > 1:
-        maybe_set_triton_cache_manager()

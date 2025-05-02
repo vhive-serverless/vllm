@@ -1,3 +1,4 @@
+
 from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import List, Dict
@@ -44,44 +45,24 @@ def build_proxy_manager(world_size: int, vllm_config: VllmConfig, mp_manager: Sy
     return ProxyManager(task_queue_dict, result_queue_dict, vllm_config)
 
 
-# Server setup
-app = FastAPI()
 
-# @app.on_event("startup")
-# def startup_event():
-#     global proxy_manager
-#     proxy_manager = build_proxy_manager()
-
-@app.post("/create_instance")
-def create_instance(req: CreateInstanceRequest):
-    global proxy_manager, mp_manager, task_queue_dict, result_queue_dict, lock_dict
-    # proxy_manager.create_instance(req.uuid, req.gpu_ids)
-    # A test process that enqueue items into task queue
-    rank = 1
-    index = 6
-    p = Process(target=test_process, args=(task_queue_dict, result_queue_dict, lock_dict, req.instance_uuid, rank, index)) 
-    p.start()
-    p.join()
-    return {"status": "created", "uuid": req.instance_uuid}
-
-def test_process(task_queue_dict:Dict[int, Queue], result_queue_dict:Dict[int, Queue], lock_dict:Dict[int, any], instance_uuid: str, rank: int, index: int):
+def test_process(task_queue_dict:Dict[int, Queue], result_queue_dict:Dict[int, Queue], lock_dict:Dict[int, any], instance_uuid: str, rank: int):
     global world_size
     gpu_proxy_client_dict: Dict[int, GPUProxyClient] = {}
     for i in range(world_size):
         gpu_proxy_client_dict[i] = GPUProxyClient(i, task_queue_dict[i], result_queue_dict[i], lock_dict[i], instance_uuid)
+    args = (6,1,9)
+    expected_output = ""
+    for i, arg in enumerate(args):
+        expected_output += f"arg{i}: {arg};"
     gpu_proxy_client_dict[rank].start()
-    output = gpu_proxy_client_dict[rank].execute_method("print_args_and_return", [index])
-    logger.info(f"output from rank: {rank} is: {output}")
+    output = gpu_proxy_client_dict[rank].execute_method("print_args_and_return", args)
+    assert output == expected_output, f"expected: {expected_output}, got: {output}"
     gpu_proxy_client_dict[rank].stop()
     return
     
 
 
-@app.post("/delete_instance")
-def delete_instance(req: DeleteInstanceRequest):
-    global proxy_manager
-    proxy_manager.delete_instance(req.uuid)
-    return {"status": "deleted", "uuid": req.uuid}
 
 if __name__ == "__main__":
     parser = FlexibleArgumentParser(
@@ -92,5 +73,9 @@ if __name__ == "__main__":
     engine_args = EngineArgs.from_cli_args(args)
     vllm_config = engine_args.create_engine_config()
     proxy_manager = build_proxy_manager(world_size=world_size,vllm_config=vllm_config, mp_manager=mp_manager)
-
-    uvicorn.run(app=app, host=args.host, port=args.port)
+    rank = 1
+    index = 6
+    instance_uuid = "process_0"
+    p = Process(target=test_process, args=(task_queue_dict, result_queue_dict, lock_dict, instance_uuid, rank, index)) 
+    p.start()
+    p.join()

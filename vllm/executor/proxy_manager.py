@@ -7,9 +7,8 @@ from queue import Queue
 from vllm.executor.distributed_gpu_executor import (  # yapf: disable
     DistributedGPUExecutor, DistributedGPUExecutorAsync)
 from vllm.executor.gpu_executor import create_worker
-from vllm.executor.proxy_manager_utils import (
-    GPUProxyWrapper, ResultHandler, WorkerMonitor,
-    set_multiprocessing_worker_envs)
+from vllm.executor.proxy_manager_utils import (GPUProxyManagerClient)
+from vllm.executor.multiproc_worker_utils import ResultHandler, WorkerMonitor, set_multiprocessing_worker_envs
 from vllm.logger import init_logger
 from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.sequence import ExecuteModelRequest
@@ -44,22 +43,22 @@ class ProxyManager(DistributedGPUExecutor):
         distributed_init_method = get_distributed_init_method(
             "127.0.0.1", get_open_port())
 
-        self.workers: List[GPUProxyWrapper] = []
+        self.workers: List[GPUProxyManagerClient] = []
         # This is the list of workers that are rank 0 of each TP group EXCEPT
         # global rank 0. These are the workers that will broadcast to the
         # rest of the workers.
-        self.tp_driver_workers: List[GPUProxyWrapper] = []
+        self.tp_driver_workers: List[GPUProxyManagerClient] = []
         # This is the list of workers that are not drivers and not the first
         # worker in a TP group. These are the workers that will be
         # broadcasted to.
-        self.non_driver_workers: List[GPUProxyWrapper] = []
+        self.non_driver_workers: List[GPUProxyManagerClient] = []
 
         if world_size == 1:
             self.worker_monitor = None
         else:
             for rank in range(1, world_size):
                 result_handler = ResultHandler()
-                worker = GPUProxyWrapper(
+                worker = GPUProxyManagerClient(
                     self.task_queue_map[rank],
                     self.result_queue_map[rank],
                     result_handler,
