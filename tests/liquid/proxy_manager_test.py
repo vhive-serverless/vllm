@@ -56,7 +56,7 @@ def test_process(task_queue_dict:Dict[int, Queue], result_queue_dict:Dict[int, Q
     for i, arg in enumerate(args):
         expected_output += f"arg{i}: {arg};"
     gpu_proxy_client_dict[rank].start()
-    output = gpu_proxy_client_dict[rank].execute_method("print_args_and_return", args)
+    output = gpu_proxy_client_dict[rank].execute_method("print_args_and_return", *args)
     assert output == expected_output, f"expected: {expected_output}, got: {output}"
     gpu_proxy_client_dict[rank].stop()
     return
@@ -76,6 +76,10 @@ if __name__ == "__main__":
     rank = 1
     index = 6
     instance_uuid = "process_0"
-    p = Process(target=test_process, args=(task_queue_dict, result_queue_dict, lock_dict, instance_uuid, rank, index)) 
+    p = Process(target=test_process, args=(task_queue_dict, result_queue_dict, lock_dict, instance_uuid, rank)) 
+    p.start()
+    p.join()
+    rank = 0
+    p = Process(target=test_process, args=(task_queue_dict, result_queue_dict, lock_dict, instance_uuid, rank)) 
     p.start()
     p.join()

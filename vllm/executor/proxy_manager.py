@@ -25,6 +25,8 @@ class ProxyManager(DistributedGPUExecutor):
         self.task_queue_map:Dict[int, Queue] = task_queue_map
         self.result_queue_map:Dict[int, Queue] = result_queue_map
         super().__init__(*args, **kwargs)
+        # change worker class to gpu proxy
+        self.vllm_config.parallel_config.worker_cls = "vllm.worker.gpu_proxy.GPUProxy"
         
 
     def _init_executor(self) -> None:
@@ -47,21 +49,21 @@ class ProxyManager(DistributedGPUExecutor):
         # This is the list of workers that are rank 0 of each TP group EXCEPT
         # global rank 0. These are the workers that will broadcast to the
         # rest of the workers.
-        self.tp_driver_workers: List[GPUProxyManagerClient] = []
+        # self.tp_driver_workers: List[GPUProxyManagerClient] = []
         # This is the list of workers that are not drivers and not the first
         # worker in a TP group. These are the workers that will be
         # broadcasted to.
-        self.non_driver_workers: List[GPUProxyManagerClient] = []
+        # self.non_driver_workers: List[GPUProxyManagerClient] = []
 
         if world_size == 1:
             self.worker_monitor = None
         else:
-            for rank in range(1, world_size):
-                result_handler = ResultHandler()
+            manager_result_handler = ResultHandler()
+            for rank in range(world_size):
                 worker = GPUProxyManagerClient(
                     self.task_queue_map[rank],
                     self.result_queue_map[rank],
-                    result_handler,
+                    manager_result_handler,
                     partial(
                         create_worker,
                         **self._get_worker_kwargs(
@@ -70,20 +72,15 @@ class ProxyManager(DistributedGPUExecutor):
                             distributed_init_method=distributed_init_method,
                         )))
                 self.workers.append(worker)
-                if rank % tensor_parallel_size == 0:
-                    self.tp_driver_workers.append(worker)
-                else:
-                    self.non_driver_workers.append(worker)
+                # if rank % tensor_parallel_size == 0:
+                #     self.tp_driver_workers.append(worker)
+                # else:
+                #     self.non_driver_workers.append(worker)
 
-            self.worker_monitor = WorkerMonitor(self.workers, result_handler)
-            result_handler.start()
+            self.worker_monitor = WorkerMonitor(self.workers, manager_result_handler)
+            manager_result_handler.start()
             self.worker_monitor.start()
 
-        # Set up signal handlers to shutdown the executor cleanly
-        # sometimes gc does not work well
-
-        self.driver_worker = self._create_worker(
-            distributed_init_method=distributed_init_method)
         self._run_workers("init_device")
 
     def _check_executor_parameters(self):
@@ -114,12 +111,7 @@ class ProxyManager(DistributedGPUExecutor):
     def _driver_execute_model(
         self, execute_model_req: Optional[ExecuteModelRequest]
     ) -> Optional[List[SamplerOutput]]:
-        """Run execute_model in the driver worker.
-
-        Passing None will cause the driver to stop the model execution
-        loop running in each of the remote workers.
-        """
-        return self.driver_worker.execute_model(execute_model_req)
+        raise NotImplementedError
 
     def _run_workers(
         self,
@@ -155,18 +147,15 @@ class ProxyManager(DistributedGPUExecutor):
             for worker in self.workers
         ]
 
-        driver_worker_method = getattr(self.driver_worker, method)
-        driver_worker_output = driver_worker_method(*args, **kwargs)
 
         # Get the results of the workers.
-        return [driver_worker_output
-                ] + [output.get() for output in worker_outputs]
+        return [output.get() for output in worker_outputs]
 
-    def check_health(self) -> None:
-        """Raises an error if engine is unhealthy."""
-        if self.worker_monitor is not None and not self.worker_monitor.is_alive(
-        ):
-            raise RuntimeError("Worker processes are not running")
+    # def check_health(self) -> None:
+    #     """Raises an error if engine is unhealthy."""
+    #     if self.worker_monitor is not None and not self.worker_monitor.is_alive(
+    #     ):
+    #         raise RuntimeError("Worker processes are not running")
 
     def _wait_for_tasks_completion(self, parallel_worker_tasks: Any) -> None:
         """Wait for futures returned from _run_workers() with
