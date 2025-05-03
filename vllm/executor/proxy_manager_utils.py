@@ -159,6 +159,12 @@ class GPUProxyManagerClient(ProcessWorkerWrapper): # Used for the proxy manager 
             del self.tasks[task_id]
             raise ChildProcessError("worker died") from e
 
+    def terminate_worker(self):
+        try:
+            self._task_queue.put(_TERMINATE)
+        except ValueError:
+            self.process.kill()
+
 
 
 def _run_gpu_proxy_process(

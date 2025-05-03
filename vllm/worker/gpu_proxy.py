@@ -11,6 +11,7 @@ from vllm.config import VllmConfig
 from vllm.distributed import (ensure_kv_transfer_initialized,
                               ensure_model_parallel_initialized,
                               initialize_tensor_parallel_group,
+                              destroy_model_parallel,
                               init_distributed_environment,
                               set_custom_all_reduce)
 from vllm.logger import init_logger
@@ -195,6 +196,12 @@ class GPUProxy(LocalOrDistributedWorkerBase):
             group_name=f"tp_{instance_uuid}",
             group_ranks=group_ranks
         )
+
+    def destroy_tensor_parallel_group(
+            self,
+    ) -> None:
+        destroy_model_parallel()
+        
         
 
     @torch.inference_mode()

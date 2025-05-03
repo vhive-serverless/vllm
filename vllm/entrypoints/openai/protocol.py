@@ -1342,4 +1342,4 @@ class CreateInstanceRequest(BaseModel):
     args: List[str]
 
 class DeleteInstanceRequest(BaseModel):
-    instance_uuid: str
+    uuid: str

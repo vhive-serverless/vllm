@@ -28,6 +28,7 @@ class ProxyManager(DistributedGPUExecutor):
         self.result_queue_map:Dict[int, Queue] = result_queue_map
         super().__init__(*args, **kwargs)
         # change worker class to gpu proxy
+        self.parallel_group_dict: Dict[str, List[int]] = {}
         
 
     def _init_executor(self) -> None:
@@ -120,6 +121,7 @@ class ProxyManager(DistributedGPUExecutor):
         *args,
         async_run_tensor_parallel_workers_only: bool = False,
         max_concurrent_workers: Optional[int] = None,
+        gpu_ids: Optional[List[int]] = None,
         **kwargs,
     ) -> Any:
         """Runs the given method on all workers.
@@ -141,11 +143,16 @@ class ProxyManager(DistributedGPUExecutor):
                 worker.execute_method(method, *args, **kwargs)
                 for worker in self.non_driver_workers
             ]
-
+        selected_workers = []
+        if gpu_ids is None:
+            selected_workers = self.workers
+        else:
+            for gpu_id in gpu_ids:
+                selected_workers.append(self.workers[gpu_id])
         # Start all remote workers first.
         worker_outputs = [
             worker.execute_method(method, *args, **kwargs)
-            for worker in self.workers
+            for worker in selected_workers
         ]
 
 
@@ -166,10 +173,14 @@ class ProxyManager(DistributedGPUExecutor):
 
     def create_instance(self, uuid: str, gpu_ids: List[int]):
         # Create group for this specific instance
-        logger.info(f"gpu_ids: {gpu_ids}")
         self._run_workers("init_tensor_parallel_group", instance_uuid=uuid, group_ranks=[gpu_ids])
+        # Register the instance uuid with its group information
+        self.parallel_group_dict[uuid] = gpu_ids
         logger.info(f"Group for instance: {uuid} is created!")
 
     def delete_instance(self, uuid: str):
-        raise NotImplementedError
+        assert uuid in self.parallel_group_dict, f"{uuid} is not registered! Cannot find the group!"
+        gpu_ids = self.parallel_group_dict.pop(uuid)
+        self._run_workers("destroy_tensor_parallel_group")
+        logger.info(f"Group for instance: {uuid} is destroyed!")
 

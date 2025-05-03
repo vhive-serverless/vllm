@@ -15,6 +15,7 @@ from vllm.entrypoints.openai.cli_args import (make_arg_parser,
                                               validate_parsed_serve_args)
 from vllm.utils import (FlexibleArgumentParser, get_open_zmq_ipc_path,
                         is_valid_ipv6_address, set_ulimit)
+import time
 logger = init_logger('vllm.entrypoints.liquid.liquid')
 
 world_size = 2
@@ -22,10 +23,6 @@ mp_manager = Manager()
 task_queue_dict = mp_manager.dict()
 result_queue_dict = mp_manager.dict()
 lock_dict = mp_manager.dict()
-
-parser = FlexibleArgumentParser(
-    description="vLLM OpenAI-Compatible RESTful API server.")
-parser = make_arg_parser(parser)
 
 # This would be your real builder
 def build_proxy_manager(world_size: int, vllm_config: VllmConfig, mp_manager: SyncManager) -> ProxyManager:
@@ -47,43 +44,7 @@ def build_proxy_manager(world_size: int, vllm_config: VllmConfig, mp_manager: Sy
 
     return ProxyManager(task_queue_dict, result_queue_dict, vllm_config)
 
-
-# Server setup
-app = FastAPI()
-
-@app.post("/create_instance")
-def create_instance(req: CreateInstanceRequest):
-    global proxy_manager, mp_manager, task_queue_dict, result_queue_dict, lock_dict
-    # proxy_manager.create_instance(req.uuid, req.gpu_ids)
-    # A test process that enqueue items into task queue
-    instance_uuid = req.uuid
-    cli = req.cli
-    envs = req.env
-    args = req.args
-    # Find the cuda visible devices
-    gpu_ids = []
-    prefix = "CUDA_VISIBLE_DEVICES="
-    for env in envs:
-        if env.startswith(prefix):
-            visible_devices_str_list = env.removeprefix(prefix).split(',')
-            gpu_ids = [int(d) for d in visible_devices_str_list]
-    assert len(gpu_ids) != 0, f"Didn't specify CUDA_VISIBLE_DEVICES in the create request!"
-    assert "serve" in args
-    args = ["--model" if arg == "serve" else arg for arg in args]
-    args = parser.parse_args(args)
-    print(args)
-
-    # First let the proxy manager adjust tensor model parallel groups
-    proxy_manager.create_instance(instance_uuid, gpu_ids)
-    return {"status": "created", "uuid": req.uuid}
-
-@app.post("/delete_instance")
-def delete_instance(req: DeleteInstanceRequest):
-    global proxy_manager
-    proxy_manager.delete_instance(req.uuid)
-    return {"status": "deleted", "uuid": req.uuid}
-
-if __name__ == "__main__":
+def test_case_first_single():
     parser = FlexibleArgumentParser(
         description="Liquid OpenAI-Compatible RESTful API server.")
     parser = make_arg_parser(parser)
@@ -92,5 +53,62 @@ if __name__ == "__main__":
     engine_args = EngineArgs.from_cli_args(args)
     vllm_config = engine_args.create_engine_config()
     proxy_manager = build_proxy_manager(world_size=world_size,vllm_config=vllm_config, mp_manager=mp_manager)
+    instance_uuid = "process_0"
+    gpu_ids = [0]
+    proxy_manager.create_instance(instance_uuid, gpu_ids)
+    proxy_manager.delete_instance(instance_uuid)
+    time.sleep(1)
+    instance_uuid = "process_1"
+    gpu_ids = [0,1]
+    proxy_manager.create_instance(instance_uuid, gpu_ids)
+    proxy_manager.delete_instance(instance_uuid)
 
-    uvicorn.run(app=app, host=args.host, port=args.port)
+def test_case_first_multi():
+    parser = FlexibleArgumentParser(
+        description="Liquid OpenAI-Compatible RESTful API server.")
+    parser = make_arg_parser(parser)
+    args = parser.parse_args()
+    validate_parsed_serve_args(args)
+    engine_args = EngineArgs.from_cli_args(args)
+    vllm_config = engine_args.create_engine_config()
+    proxy_manager = build_proxy_manager(world_size=world_size,vllm_config=vllm_config, mp_manager=mp_manager)
+    instance_uuid = "process_0"
+    gpu_ids = [0,1]
+    proxy_manager.create_instance(instance_uuid, gpu_ids)
+    proxy_manager.delete_instance(instance_uuid)
+    time.sleep(1)
+    instance_uuid = "process_1"
+    gpu_ids = [0]
+    proxy_manager.create_instance(instance_uuid, gpu_ids)
+    proxy_manager.delete_instance(instance_uuid)
+
+def test_case_multi_single():
+    parser = FlexibleArgumentParser(
+        description="Liquid OpenAI-Compatible RESTful API server.")
+    parser = make_arg_parser(parser)
+    args = parser.parse_args()
+    validate_parsed_serve_args(args)
+    engine_args = EngineArgs.from_cli_args(args)
+    vllm_config = engine_args.create_engine_config()
+    proxy_manager = build_proxy_manager(world_size=world_size,vllm_config=vllm_config, mp_manager=mp_manager)
+    instance_uuid_0 = "process_0"
+    gpu_ids = [0]
+    proxy_manager.create_instance(instance_uuid_0, gpu_ids)
+    time.sleep(1)
+    instance_uuid_1 = "process_1"
+    gpu_ids = [1]
+    proxy_manager.create_instance(instance_uuid_1, gpu_ids)
+    time.sleep(1)
+    proxy_manager.delete_instance(instance_uuid_0)
+    proxy_manager.delete_instance(instance_uuid_1)
+
+
+
+    
+
+
+
+if __name__ == "__main__":
+    test_case_first_single()
+    test_case_first_multi()
+    test_case_multi_single()

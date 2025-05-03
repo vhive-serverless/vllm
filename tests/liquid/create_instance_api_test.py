@@ -11,7 +11,7 @@ generated_uuid = str(uuid.uuid4())
 payload = {
     "uuid": generated_uuid,
     "cli": "vllm",
-    "env": ["CUDA_VISIBLE_DEVICES=0,1"],
+    "env": ["CUDA_VISIBLE_DEVICES=0"],
     "args": [
         "serve",
         "/models/meta-llama/Llama-3.1-8B",

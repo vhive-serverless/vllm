@@ -41,6 +41,7 @@ from vllm.distributed.utils import StatelessProcessGroup
 from vllm.logger import init_logger
 from vllm.platforms import current_platform
 from vllm.utils import direct_register_custom_op, supports_custom_op
+import os
 
 if TYPE_CHECKING:
     from vllm.config import VllmConfig
@@ -191,6 +192,8 @@ class GroupCoordinator:
                 self.device_group = device_group
                 self.cpu_group = cpu_group
 
+        if self.cpu_group is None or self.device_group is None:
+            return
         assert self.cpu_group is not None
         assert self.device_group is not None
 
@@ -873,7 +876,8 @@ def init_model_parallel_group(
 ) -> GroupCoordinator:
     if use_custom_allreduce is None:
         use_custom_allreduce = _ENABLE_CUSTOM_ALL_REDUCE
-    return GroupCoordinator(
+     
+    group_coordinator = GroupCoordinator(
         group_ranks=group_ranks,
         local_rank=local_rank,
         torch_distributed_backend=backend,
@@ -885,6 +889,9 @@ def init_model_parallel_group(
         use_message_queue_broadcaster=use_message_queue_broadcaster,
         group_name=group_name,
     )
+    if group_coordinator.device_group is None or group_coordinator.cpu_group is None:
+        group_coordinator = None
+    return group_coordinator
 
 
 _TP: Optional[GroupCoordinator] = None
