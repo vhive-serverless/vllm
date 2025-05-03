@@ -15,13 +15,16 @@ from vllm.entrypoints.openai.cli_args import (make_arg_parser,
                                               validate_parsed_serve_args)
 from vllm.utils import (FlexibleArgumentParser, get_open_zmq_ipc_path,
                         is_valid_ipv6_address, set_ulimit)
+from vllm.entrypoints.openai.liquid_api_server import start_openai_api_server
+
 logger = init_logger('vllm.entrypoints.liquid.liquid')
 
 world_size = 2
 mp_manager = Manager()
-task_queue_dict = mp_manager.dict()
-result_queue_dict = mp_manager.dict()
-lock_dict = mp_manager.dict()
+shared_dict = mp_manager.dict()
+shared_dict["task_queue_dict"] = mp_manager.dict()
+shared_dict["result_queue_dict"] = mp_manager.dict()
+shared_dict["lock_dict"] = mp_manager.dict()
 
 parser = FlexibleArgumentParser(
     description="vLLM OpenAI-Compatible RESTful API server.")
@@ -33,19 +36,18 @@ def build_proxy_manager(world_size: int, vllm_config: VllmConfig, mp_manager: Sy
     vllm_config.parallel_config.tensor_parallel_size = world_size
     vllm_config.parallel_config.world_size = world_size
     logger.info(f"{vllm_config}")
-    global task_queue_dict 
+    global shared_dict 
     for i in range(world_size):
-        task_queue_dict[i] = mp_manager.Queue()
+        shared_dict["task_queue_dict"][i] = mp_manager.Queue()
     
-    global result_queue_dict
     for i in range(world_size):
-        result_queue_dict[i] = mp_manager.Queue()
+        shared_dict["result_queue_dict"][i] = mp_manager.Queue()
 
     global lock_dict
     for i in range(world_size):
-        lock_dict[i] = mp_manager.Lock()
+        shared_dict['lock_dict'][i] = mp_manager.Lock()
 
-    return ProxyManager(task_queue_dict, result_queue_dict, vllm_config)
+    return ProxyManager(shared_dict, vllm_config)
 
 
 # Server setup
@@ -75,6 +77,14 @@ def create_instance(req: CreateInstanceRequest):
 
     # First let the proxy manager adjust tensor model parallel groups
     proxy_manager.create_instance(instance_uuid, gpu_ids)
+    # Then we start the api server of vllm in a separate process
+    p = Process(target=start_openai_api_server, args=(
+        shared_dict,
+        gpu_ids,
+        instance_uuid,
+        args,))
+    p.start()
+     
     return {"status": "created", "uuid": req.uuid}
 
 @app.post("/delete_instance")

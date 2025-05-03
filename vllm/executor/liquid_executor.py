@@ -1,63 +1,132 @@
 import asyncio
-from abc import abstractmethod
-from typing import Any, Awaitable, Dict, List, Optional, Set, Tuple, Union
+import os
+from functools import partial
+from typing import Any, List, Optional
 
-from vllm.config import VllmConfig
-from vllm.executor.executor_base import ExecutorAsyncBase
-from vllm.executor.gpu_executor import GPUExecutor
+from vllm.executor.distributed_gpu_executor import (  # yapf: disable
+    DistributedGPUExecutor, DistributedGPUExecutorAsync)
+from vllm.executor.gpu_executor import create_worker
+from vllm.executor.multiproc_worker_utils import (
+    ProcessWorkerWrapper, ResultHandler, WorkerMonitor,
+    set_multiprocessing_worker_envs)
 from vllm.logger import init_logger
-from vllm.lora.request import LoRARequest
 from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.sequence import ExecuteModelRequest
+from vllm.utils import (_run_task_with_lock, cuda_device_count_stateless,
+                        get_distributed_init_method, get_open_port, make_async,
+                        update_environment_variables)
+
+from vllm.executor.proxy_manager_utils import GPUProxyClient
 
 logger = init_logger(__name__)
 
-class LiquidExecutor(GPUExecutor):
-    def __init__(self, *args, **kwargs):
-        # This is non-None when the execute model loop is running
-        # in the parallel workers. It's a coroutine in the AsyncLLMEngine case.
-        self.parallel_worker_tasks: Optional[Union[Any, Awaitable[Any]]] = None
-        # Updated by implementations that require additional args to be passed
-        # to the _run_workers execute_model call
-        self.extra_execute_model_run_workers_kwargs: Dict[str, Any] = {}
 
+class LiquidExecutor(DistributedGPUExecutor):
+    """Python multiprocessing-based multi-GPU executor"""
+
+    uses_ray: bool = False
+
+    def __init__(self, shared_dict, *args, **kwargs):
+        self.shared_dict = shared_dict
         super().__init__(*args, **kwargs)
+        self.gpu_ids = self.vllm_config.liquid_config.gpu_ids
+        self.instance_uuid = self.vllm_config.liquid_config.instance_uuid
 
-    def _run_workers(self):
-        raise NotImplementedError
+    def _init_executor(self) -> None:
+        logger.info(f"init liquid executor...")
+        self.workers: List[GPUProxyClient] = []
+        for gpu_id in self.gpu_ids:
+            task_queue = self.shared_dict["task_queue_dict"][gpu_id]
+            result_queue = self.shared_dict["result_queue_dict"][gpu_id]
+            lock = self.shared_dict["lock_dict"][gpu_id]
+            worker = GPUProxyClient(gpu_id, task_queue, result_queue, lock, self.instance_uuid)
+            self.workers.append(worker)
 
-    def execute_model(
-        self,
-        execute_model_req: ExecuteModelRequest,
-    ) -> List[SamplerOutput]:
-        if self.parallel_worker_tasks is None:
-            self.parallel_worker_tasks = self._run_workers(
-                "start_worker_execution_loop",
-                async_run_tensor_parallel_workers_only=True,
-                **self.extra_execute_model_run_workers_kwargs)
+    def _check_executor_parameters(self):
+        world_size = self.parallel_config.world_size
+        tensor_parallel_size = self.parallel_config.tensor_parallel_size
 
-        # Only the driver worker returns the sampling results.
-        driver_outputs = self._driver_execute_model(execute_model_req)
-        assert driver_outputs is not None
-        return driver_outputs
+        # Set CUDA_VISIBLE_DEVICES for the driver, inherited by workers
+        if "CUDA_VISIBLE_DEVICES" not in os.environ:
+            update_environment_variables({
+                "CUDA_VISIBLE_DEVICES": (",".join(map(str, range(world_size))))
+            })
 
-    def determine_num_available_blocks(self) -> Tuple[int, int]:
-        """Determine the number of available KV blocks.
+        cuda_device_count = cuda_device_count_stateless()
+        # Use confusing message for more common TP-only case.
+        assert tensor_parallel_size <= cuda_device_count, (
+            f"please set tensor_parallel_size ({tensor_parallel_size}) "
+            f"to less than max local gpu count ({cuda_device_count})")
 
-        This invokes `determine_num_available_blocks` on each worker and takes
-        the min of the results, guaranteeing that the selected cache sizes are
-        compatible with all workers.
+        assert world_size <= cuda_device_count, (
+            f"please ensure that world_size ({world_size}) "
+            f"is less than than max local gpu count ({cuda_device_count})")
 
-        Returns:
-            - tuple[num_gpu_blocks, num_cpu_blocks]
+    def shutdown(self):
+        if (worker_monitor := getattr(self, "worker_monitor",
+                                      None)) is not None:
+            worker_monitor.close()
+
+    def _driver_execute_model(
+        self, execute_model_req: Optional[ExecuteModelRequest]
+    ) -> Optional[List[SamplerOutput]]:
+        """Run execute_model in the driver worker.
+
+        Passing None will cause the driver to stop the model execution
+        loop running in each of the remote workers.
         """
-        # Get the maximum number of blocks that can be allocated on GPU and CPU.
-        num_blocks = self._run_workers("determine_num_available_blocks", )
+        return self.driver_worker.execute_model(execute_model_req)
 
-        # Since we use a shared centralized controller, we take the minimum
-        # number of blocks across all workers to make sure all the memory
-        # operators can be applied to all workers.
-        num_gpu_blocks = min(b[0] for b in num_blocks)
-        num_cpu_blocks = min(b[1] for b in num_blocks)
+    def _run_workers(
+        self,
+        method: str,
+        *args,
+        async_run_tensor_parallel_workers_only: bool = False,
+        max_concurrent_workers: Optional[int] = None,
+        **kwargs,
+    ) -> Any:
+        """Runs the given method on all workers.
 
-        return num_gpu_blocks, num_cpu_blocks
+        Args:
+            async_run_tensor_parallel_workers_only: If True the method will be
+                run only in the remote TP workers, not the driver worker.
+                It will also be run asynchronously and return a list of futures
+                rather than blocking on the results.
+        """
+
+        if max_concurrent_workers:
+            raise NotImplementedError(
+                "max_concurrent_workers is not supported yet.")
+
+        if async_run_tensor_parallel_workers_only:
+            # Run only non-driver workers and just return futures.
+            return [
+                worker.execute_method(method, *args, **kwargs)
+                for worker in self.non_driver_workers
+            ]
+
+        # Start all remote workers first.
+        worker_outputs = [
+            worker.execute_method(method, *args, **kwargs)
+            for worker in self.workers
+        ]
+
+        driver_worker_method = getattr(self.driver_worker, method)
+        driver_worker_output = driver_worker_method(*args, **kwargs)
+
+        # Get the results of the workers.
+        return [driver_worker_output
+                ] + [output.get() for output in worker_outputs]
+
+    def check_health(self) -> None:
+        """Raises an error if engine is unhealthy."""
+        if self.worker_monitor is not None and not self.worker_monitor.is_alive(
+        ):
+            raise RuntimeError("Worker processes are not running")
+
+    def _wait_for_tasks_completion(self, parallel_worker_tasks: Any) -> None:
+        """Wait for futures returned from _run_workers() with
+        async_run_remote_workers_only to complete."""
+        for result in parallel_worker_tasks:
+            result.get()
+

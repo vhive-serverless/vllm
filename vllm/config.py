@@ -2954,7 +2954,8 @@ class CompilationConfig(BaseModel):
 
 @dataclass
 class LiquidConfig:
-    world_size: int
+    gpu_ids: List[int]
+    instance_uuid: str
 
 @dataclass
 class VllmConfig:

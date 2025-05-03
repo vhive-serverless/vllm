@@ -14,11 +14,11 @@ payload = {
     "env": ["CUDA_VISIBLE_DEVICES=0"],
     "args": [
         "serve",
-        "/models/meta-llama/Llama-3.1-8B",
+        "facebook/opt-125m",
         "--gpu-memory-utilization",
         "0.9",
         "--load-format",
-        "serverless_llm",
+        "auto",
         "--served-model-name",
         "meta-llama/Llama-3.1-8B",
         "--enable-chunked-prefill",

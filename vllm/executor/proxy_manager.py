@@ -21,11 +21,13 @@ logger = init_logger(__name__)
 
 class ProxyManager(DistributedGPUExecutor):
     
-    def __init__(self,task_queue_map:Dict[int, Queue], result_queue_map: Dict[int, Queue], *args, **kwargs):
+    def __init__(self,shared_dict, *args, **kwargs):
+        task_queue_dict = shared_dict["task_queue_dict"]
+        result_queue_dict = shared_dict["result_queue_dict"]
         vllm_config = args[0]
         vllm_config.parallel_config.worker_cls = "vllm.worker.gpu_proxy.GPUProxy"
-        self.task_queue_map:Dict[int, Queue] = task_queue_map
-        self.result_queue_map:Dict[int, Queue] = result_queue_map
+        self.task_queue_dict:Dict[int, Queue] = task_queue_dict
+        self.result_queue_dict:Dict[int, Queue] = result_queue_dict
         super().__init__(*args, **kwargs)
         # change worker class to gpu proxy
         self.parallel_group_dict: Dict[str, List[int]] = {}
@@ -63,8 +65,8 @@ class ProxyManager(DistributedGPUExecutor):
             manager_result_handler = ResultHandler()
             for rank in range(world_size):
                 worker = GPUProxyManagerClient(
-                    self.task_queue_map[rank],
-                    self.result_queue_map[rank],
+                    self.task_queue_dict[rank],
+                    self.result_queue_dict[rank],
                     manager_result_handler,
                     partial(
                         create_worker,

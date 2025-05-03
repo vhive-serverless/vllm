@@ -60,6 +60,7 @@ from vllm.usage.usage_lib import (UsageContext, is_usage_stats_enabled,
                                   usage_message)
 from vllm.utils import Counter, Device, deprecate_kwargs, weak_bind
 from vllm.version import __version__ as VLLM_VERSION
+from vllm.executor.liquid_executor import LiquidExecutor
 
 logger = init_logger(__name__)
 _LOCAL_LOGGING_INTERVAL_SEC = 5
@@ -214,6 +215,7 @@ class LLMEngine:
         input_registry: InputRegistry = INPUT_REGISTRY,
         mm_registry: MultiModalRegistry = MULTIMODAL_REGISTRY,
         use_cached_outputs: bool = False,
+        shared_dict = None,
     ) -> None:
 
         self.vllm_config = vllm_config
@@ -270,7 +272,12 @@ class LLMEngine:
         self.input_processor = input_registry.create_input_processor(
             self.model_config)
 
-        self.model_executor = executor_class(vllm_config=vllm_config, )
+        if executor_class == LiquidExecutor:
+            assert shared_dict is not None
+            self.model_executor = executor_class(shared_dict=shared_dict, vllm_config=vllm_config,)
+        else:
+            self.model_executor = executor_class(vllm_config=vllm_config, )
+
 
         if self.model_config.runner_type != "pooling":
             self._initialize_kv_caches()

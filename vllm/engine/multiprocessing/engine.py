@@ -105,13 +105,15 @@ class MQLLMEngine:
 
     @classmethod
     def from_engine_args(cls, engine_args: AsyncEngineArgs,
-                         usage_context: UsageContext, ipc_path: str):
+                         usage_context: UsageContext, ipc_path: str, *args, **kwargs):
         """Creates an MQLLMEngine from the engine arguments."""
         # Setup plugins for each process
         from vllm.plugins import load_general_plugins
         load_general_plugins()
 
         engine_config = engine_args.create_engine_config(usage_context)
+        engine_config.liquid_config.gpu_ids = kwargs.get("gpu_ids", [])
+        engine_config.liquid_config.instance_uuid = kwargs.get("instance_uuid", "")
         executor_class = LLMEngine._get_executor_cls(engine_config)
 
         use_async_sockets = engine_config.model_config.use_async_output_proc
@@ -120,9 +122,12 @@ class MQLLMEngine:
                    use_async_sockets=use_async_sockets,
                    vllm_config=engine_config,
                    executor_class=executor_class,
+                   *args,
                    log_requests=not engine_args.disable_log_requests,
                    log_stats=not engine_args.disable_log_stats,
-                   usage_context=usage_context)
+                   usage_context=usage_context,
+                   **kwargs,
+                   )
 
     def start(self):
         try:
@@ -352,11 +357,11 @@ def signal_handler(*_) -> None:
 
 
 def run_mp_engine(engine_args: AsyncEngineArgs, usage_context: UsageContext,
-                  ipc_path: str, engine_alive):
+                  ipc_path: str, engine_alive, shared_dict, gpu_ids, instance_uuid):
     try:
         engine = MQLLMEngine.from_engine_args(engine_args=engine_args,
                                               usage_context=usage_context,
-                                              ipc_path=ipc_path)
+                                              ipc_path=ipc_path, shared_dict=shared_dict, gpu_ids=gpu_ids, instance_uuid=instance_uuid)
 
         signal.signal(signal.SIGTERM, signal_handler)
 
