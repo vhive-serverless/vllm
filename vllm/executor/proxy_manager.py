@@ -88,8 +88,6 @@ class ProxyManager(DistributedGPUExecutor):
         self._run_workers("init_device")
         pipeline_parallel_group_ranks = [[i] for i in range(world_size)]
         self._run_workers("init_pipeline_parallel_group", _MANAGER_INSTANCE_UUID, pipeline_parallel_group_ranks)
-        # set all proxy clients as non-driver
-        self._run_workers("set_is_driver_worker", False)
 
     def _check_executor_parameters(self):
         world_size = self.parallel_config.world_size
@@ -183,15 +181,10 @@ class ProxyManager(DistributedGPUExecutor):
         # Register the instance uuid with its group information
         self.parallel_group_dict[uuid] = gpu_ids
         # set the driver worker for this instance
-        driver_rank = gpu_ids[0]
-        self._run_workers("set_is_driver_worker", True, gpu_ids=[driver_rank])
         logger.info(f"Group for instance: {uuid} is created!")
 
     def delete_instance(self, uuid: str):
         assert uuid in self.parallel_group_dict, f"{uuid} is not registered! Cannot find the group!"
         self._run_workers("destroy_tensor_parallel_group")
-        gpu_ids = self.parallel_group_dict.pop(uuid)
-        driver_rank = gpu_ids[0]
-        self._run_workers("set_is_driver_worker", False, gpu_ids=[driver_rank])
         logger.info(f"Group for instance: {uuid} is destroyed!")
 

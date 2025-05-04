@@ -77,20 +77,21 @@ class GPUProxy(LocalOrDistributedWorkerBase):
                 not in ["medusa", "mlp_speculator", "eagle"]) \
                     else {"return_hidden_states": True}
 
-        ModelRunnerClass: Type[GPUModelRunnerBase] = ModelRunner
-        if model_config.runner_type == "pooling":
-            ModelRunnerClass = PoolingModelRunner
-        elif self.model_config.is_encoder_decoder:
-            ModelRunnerClass = EncoderDecoderModelRunner
-        self.model_runner: GPUModelRunnerBase = ModelRunnerClass(
-            vllm_config=self.vllm_config,
-            kv_cache_dtype=self.cache_config.cache_dtype,
-            is_driver_worker=is_driver_worker,
-            **speculative_args,
-        )
+        # ModelRunnerClass: Type[GPUModelRunnerBase] = ModelRunner
+        # if model_config.runner_type == "pooling":
+        #     ModelRunnerClass = PoolingModelRunner
+        # elif self.model_config.is_encoder_decoder:
+        #     ModelRunnerClass = EncoderDecoderModelRunner
+        # self.model_runner: GPUModelRunnerBase = ModelRunnerClass(
+        #     vllm_config=self.vllm_config,
+        #     kv_cache_dtype=self.cache_config.cache_dtype,
+        #     is_driver_worker=is_driver_worker,
+        #     **speculative_args,
+        # )
         if model_runner_cls is not None:
-            self.model_runner = model_runner_cls(self.model_runner)
-
+            self.model_runner_cls = model_runner_cls
+            # self.model_runner = model_runner_cls(self.model_runner)
+        self.model_runner = None
         # Uninitialized cache engine. Will be initialized by
         # initialize_cache.
         self.cache_engine: List[CacheEngine]
@@ -212,6 +213,34 @@ class GPUProxy(LocalOrDistributedWorkerBase):
             self,
     ) -> None:
         destroy_tensor_parallel()
+
+    def init_model_runner(
+            self, vllm_config: VllmConfig, is_driver_worker: bool,
+    ):
+        self.vllm_config = vllm_config
+        self.model_config = vllm_config.model_config
+
+        self.is_driver_worker = is_driver_worker
+        assert self.model_runner is None, f"model runner is not None! Cannot init it again!"
+        ModelRunnerClass: Type[GPUModelRunnerBase] = ModelRunner
+        if self.vllm_config.model_config.runner_type == "pooling":
+            ModelRunnerClass = PoolingModelRunner
+        elif self.vllm_config.model_config.is_encoder_decoder:
+            ModelRunnerClass = EncoderDecoderModelRunner
+        speculative_config = self.vllm_config.speculative_config
+        model_config = self.vllm_config.model_config
+        speculative_args = {} if speculative_config is None \
+            or (speculative_config.draft_model_config.model ==
+                model_config.model) \
+            or (speculative_config.draft_model_config.hf_config.model_type
+                not in ["medusa", "mlp_speculator", "eagle"]) \
+                    else {"return_hidden_states": True}
+        self.model_runner: GPUModelRunnerBase = ModelRunnerClass(
+            vllm_config=self.vllm_config,
+            kv_cache_dtype=self.vllm_config.cache_config.cache_dtype,
+            is_driver_worker=is_driver_worker,
+            **speculative_args,
+        )
         
         
 
@@ -496,6 +525,38 @@ class GPUProxy(LocalOrDistributedWorkerBase):
         for i, arg in enumerate(args):
             result_str += f"arg{i}: {arg};"
         return result_str
+
+    def get_cuda_memory_stats(self):
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA is not available on this system.")
+
+        device = torch.device(f"cuda:{self.rank}")
+        gc.collect()
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize(device)
+        total_memory = torch.cuda.get_device_properties(device).total_memory
+        reserved_memory = torch.cuda.memory_reserved(device)
+        allocated_memory = torch.cuda.memory_allocated(device)
+
+        return (total_memory,
+                reserved_memory,
+                allocated_memory
+        )
+
+    def clean(self):
+        total, reserved, alloc = self.get_cuda_memory_stats()
+        logger.info(f"Clean up all states on GPU, on GPU[{self.rank}] there are {reserved/(1024**3):.1f}GB reserved, {alloc/(1024**3):.1f} GB allocated, capacity: {total/(1024**3):.1f}GB")
+        self.model_runner.clean()
+        del self.gpu_cache
+        for e in self.cache_engine:
+            e.clean()
+        self.model_runner = None
+        self.cache_engine = None
+        gc.collect()
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        total, reserved, alloc = self.get_cuda_memory_stats()
+        logger.info(f"Finished clean up all states on GPU, on GPU[{self.rank}] there are {reserved/(1024**3):.1f}GB reserved, {alloc/(1024**3):.1f} GB allocated, capacity: {total/(1024**3):.1f}GB")
 
 
 

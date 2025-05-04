@@ -1172,6 +1172,12 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                 fullgraph=envs.VLLM_TEST_DYNAMO_FULLGRAPH_CAPTURE,
                 backend=backend)
 
+    def clean(
+        self
+    ):
+        del self.model
+        self.model = None
+
     def save_sharded_state(
         self,
         path: str,

@@ -26,6 +26,8 @@ shared_dict["task_queue_dict"] = mp_manager.dict()
 shared_dict["result_queue_dict"] = mp_manager.dict()
 shared_dict["lock_dict"] = mp_manager.dict()
 
+instance_id_process_dict: Dict[str, Process] = {}
+
 parser = FlexibleArgumentParser(
     description="vLLM OpenAI-Compatible RESTful API server.")
 parser = make_arg_parser(parser)
@@ -83,6 +85,7 @@ def create_instance(req: CreateInstanceRequest):
         gpu_ids,
         instance_uuid,
         args,))
+    instance_id_process_dict[instance_uuid] = p
     p.start()
      
     return {"status": "created", "uuid": req.uuid}
@@ -90,6 +93,8 @@ def create_instance(req: CreateInstanceRequest):
 @app.post("/delete_instance")
 def delete_instance(req: DeleteInstanceRequest):
     global proxy_manager
+    p = instance_id_process_dict.pop(req.uuid)
+    p.terminate()
     proxy_manager.delete_instance(req.uuid)
     return {"status": "deleted", "uuid": req.uuid}
 

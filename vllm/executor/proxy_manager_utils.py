@@ -11,6 +11,7 @@ from multiprocessing.connection import wait
 from multiprocessing.process import BaseProcess
 from typing import (Any, Callable, Dict, Generic, List, Optional, TextIO,
                     TypeVar, Union)
+import queue
 
 
 import vllm.envs as envs
@@ -48,7 +49,12 @@ class GPUProxyResult(Result):
     """Result of task dispatched to worker"""
     instance_uuid: str = ""
 
-
+def empty_manager_queue(q):
+    try:
+        while True:
+            q.get_nowait()
+    except queue.Empty:
+        pass
 
 class GPUProxyClient:
     def __init__(self, gpu_id: int, task_queue: Queue, result_queue: Queue, lock: Lock, instance_uuid: str):
@@ -64,10 +70,12 @@ class GPUProxyClient:
     def start(self):
         # Try to acquire the lock
         self.__acquire()
+        # Empty the result queue
+        empty_manager_queue(self.result_queue) 
         self.result_listener.start()
 
     def stop(self):
-        self.result_queue.put(None)
+        self.result_queue.put(_TERMINATE)
         self.__release()
 
     def __acquire(self):
@@ -102,9 +110,6 @@ class GPUProxyClient:
     def _result_listener(self):
         assert self._has_lock, f"{os.getpid()} haven't acquired the lock for gpu: {self.gpu_id}"
         for result in iter(self.result_queue.get, _TERMINATE):
-            if result is None:  # Sentinel value to terminate
-                logger.info(f"Received shutdown signal for GPUProxyClient: {self.gpu_id}")
-                break
             assert isinstance(result, GPUProxyResult), f"Got unexpected result from result queue! Result type:{type(result)}"
             assert result.instance_uuid == self.instance_uuid, f"Got result from instance {result.instance_uuid}, however, current instance's uuid: {self.instance_uuid}"
             assert result.task_id in self.task_map, f"Got unregistered result! Result's task_id: {result.task_id}"

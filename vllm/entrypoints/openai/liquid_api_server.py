@@ -735,7 +735,6 @@ async def run_server(shared_dict, gpu_ids, instance_uuid, args, **uvicorn_kwargs
     # workaround to avoid footguns where uvicorn drops requests with too
     # many concurrent requests active
     set_ulimit()
-
     def signal_handler(*_) -> None:
         # Interrupt server on sigterm while initializing
         raise KeyboardInterrupt("terminated")
@@ -748,6 +747,7 @@ async def run_server(shared_dict, gpu_ids, instance_uuid, args, **uvicorn_kwargs
         model_config = await engine_client.get_model_config()
         init_app_state(engine_client, model_config, app.state, args)
 
+        logger.info(f"Block before serve_http")
         shutdown_task = await serve_http(
             app,
             host=args.host,
@@ -760,6 +760,7 @@ async def run_server(shared_dict, gpu_ids, instance_uuid, args, **uvicorn_kwargs
             ssl_cert_reqs=args.ssl_cert_reqs,
             **uvicorn_kwargs,
         )
+        logger.info(f"Gracefully shut down the llm engine!")
 
     # NB: Await server shutdown only after the backend context is exited
     await shutdown_task

@@ -354,8 +354,13 @@ class MQLLMEngine:
         else:
             self.engine.model_executor._run_workers("stop_profile")
 
+    def signal_handler(self, *_) -> None:
+        logger.info(f"Clear up all states in the executor")
+        self.engine.model_executor.clean()
+        raise KeyboardInterrupt("MQLLMEngine terminated")
 
-def signal_handler(*_) -> None:
+
+def signal_handler(self, *_) -> None:
     raise KeyboardInterrupt("MQLLMEngine terminated")
 
 
@@ -366,7 +371,7 @@ def run_mp_engine(engine_args: AsyncEngineArgs, usage_context: UsageContext,
                                               usage_context=usage_context,
                                               ipc_path=ipc_path, shared_dict=shared_dict, gpu_ids=gpu_ids, instance_uuid=instance_uuid)
 
-        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGTERM, engine.signal_handler)
 
         engine.start()
 
