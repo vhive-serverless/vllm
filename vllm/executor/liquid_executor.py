@@ -126,10 +126,8 @@ class LiquidExecutor(DistributedGPUExecutor):
         return [output.get() for output in worker_outputs]
 
     def check_health(self) -> None:
-        """Raises an error if engine is unhealthy."""
-        if self.worker_monitor is not None and not self.worker_monitor.is_alive(
-        ):
-            raise RuntimeError("Worker processes are not running")
+        """Engine is healthy or not is not determined by the liquid executor"""
+        pass
 
     def _wait_for_tasks_completion(self, parallel_worker_tasks: Any) -> None:
         """Wait for futures returned from _run_workers() with
