@@ -7,7 +7,7 @@ from queue import Queue
 from vllm.executor.distributed_gpu_executor import (  # yapf: disable
     DistributedGPUExecutor, DistributedGPUExecutorAsync)
 from vllm.executor.gpu_executor import create_worker
-from vllm.executor.proxy_manager_utils import (GPUProxyManagerClient)
+from vllm.executor.proxy_manager_utils import (GPUProxyManagerClient, _MANAGER_INSTANCE_UUID)
 from vllm.executor.multiproc_worker_utils import ResultHandler, WorkerMonitor, set_multiprocessing_worker_envs
 from vllm.logger import init_logger
 from vllm.model_executor.layers.sampler import SamplerOutput
@@ -86,6 +86,8 @@ class ProxyManager(DistributedGPUExecutor):
             self.worker_monitor.start()
 
         self._run_workers("init_device")
+        pipeline_parallel_group_ranks = [[i] for i in range(world_size)]
+        self._run_workers("init_pipeline_parallel_group", _MANAGER_INSTANCE_UUID, pipeline_parallel_group_ranks)
 
     def _check_executor_parameters(self):
         world_size = self.parallel_config.world_size

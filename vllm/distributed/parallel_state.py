@@ -997,7 +997,7 @@ def init_distributed_environment(
 
 def initialize_tensor_parallel_group(
         group_name: str,
-        group_ranks: List[int],
+        group_ranks: List[List[int]],
         backend: Optional[str] = None,
 ):
     global _TP
@@ -1007,6 +1007,20 @@ def initialize_tensor_parallel_group(
                                     get_world_group().local_rank,
                                     backend,
                                     use_message_queue_broadcaster=True,
+                                    group_name=group_name)
+
+def initialize_pipeline_parallel_group(
+        group_name: str,
+        group_ranks: List[List[int]],
+        backend: Optional[str] = None,
+):
+    global _PP
+    backend = backend or torch.distributed.get_backend(
+        get_world_group().device_group)
+    _PP = init_model_parallel_group(group_ranks,
+                                    get_world_group().local_rank,
+                                    backend,
+                                    use_custom_allreduce=False,
                                     group_name=group_name)
 
 def initialize_model_parallel(
@@ -1176,6 +1190,12 @@ def get_tensor_model_parallel_rank():
     """Return my rank for the tensor model parallel group."""
     return get_tp_group().rank_in_group
 
+def destroy_tensor_parallel():
+    """Set the groups to none and destroy them."""
+    global _TP
+    if _TP:
+        _TP.destroy()
+    _TP = None
 
 def destroy_model_parallel():
     """Set the groups to none and destroy them."""

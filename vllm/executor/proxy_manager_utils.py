@@ -83,8 +83,8 @@ class GPUProxyClient:
             self._has_lock = False
             logger.info(f"{os.getpid()} released lock for gpu: {self.gpu_id}!")
 
-    def execute_method(self, method: str, *args, **kwargs) -> Generic[T]:
-        # Execute a function remotely in GPUProxy, this is a sync function
+    def execute_method(self, method: str, *args, **kwargs) -> ResultFuture:
+        # Execute a function remotely in GPUProxy, this is a async function
         assert self._has_lock, f"{os.getpid()} haven't acquired the lock for gpu: {self.gpu_id}"
         task_id = uuid.uuid4()
         task = GPUProxyTask(
@@ -97,10 +97,7 @@ class GPUProxyClient:
         self.task_queue.put(task)
         # Register the task's future
         self.task_map[task_id] = ResultFuture()
-        output = self.task_map[task_id].get()
-        # Get the result, deregister the future
-        self.task_map.pop(task_id) 
-        return output
+        return self.task_map[task_id]
 
     def _result_listener(self):
         assert self._has_lock, f"{os.getpid()} haven't acquired the lock for gpu: {self.gpu_id}"
@@ -112,6 +109,7 @@ class GPUProxyClient:
             assert result.instance_uuid == self.instance_uuid, f"Got result from instance {result.instance_uuid}, however, current instance's uuid: {self.instance_uuid}"
             assert result.task_id in self.task_map, f"Got unregistered result! Result's task_id: {result.task_id}"
             self.task_map[result.task_id].set_result(result)
+            self.task_map.pop(result.task_id)
 
         logger.info(f"Exit result listener for GPUProxyClient: {self.gpu_id}")
 
@@ -164,6 +162,9 @@ class GPUProxyManagerClient(ProcessWorkerWrapper): # Used for the proxy manager 
             self._task_queue.put(_TERMINATE)
         except ValueError:
             self.process.kill()
+
+    def kill_worker(self):
+        self.process.kill()
 
 
 

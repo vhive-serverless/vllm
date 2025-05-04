@@ -22,6 +22,7 @@ from vllm.executor.gpu_executor import GPUExecutor
 from vllm.logger import init_logger
 from vllm.outputs import RequestOutput
 from vllm.usage.usage_lib import UsageContext
+from vllm.config import LiquidConfig
 
 logger = init_logger(__name__)
 
@@ -112,8 +113,9 @@ class MQLLMEngine:
         load_general_plugins()
 
         engine_config = engine_args.create_engine_config(usage_context)
-        engine_config.liquid_config.gpu_ids = kwargs.get("gpu_ids", [])
-        engine_config.liquid_config.instance_uuid = kwargs.get("instance_uuid", "")
+        engine_config.liquid_config = LiquidConfig(gpu_ids=[], instance_uuid="")
+        engine_config.liquid_config.gpu_ids = kwargs.pop("gpu_ids", [])
+        engine_config.liquid_config.instance_uuid = kwargs.pop("instance_uuid", "")
         executor_class = LLMEngine._get_executor_cls(engine_config)
 
         use_async_sockets = engine_config.model_config.use_async_output_proc

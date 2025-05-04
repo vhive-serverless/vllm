@@ -27,20 +27,28 @@ class LiquidExecutor(DistributedGPUExecutor):
     uses_ray: bool = False
 
     def __init__(self, shared_dict, *args, **kwargs):
+        assert "vllm_config" in kwargs
+        vllm_config = kwargs['vllm_config']
         self.shared_dict = shared_dict
+        self.gpu_ids = vllm_config.liquid_config.gpu_ids
+        self.instance_uuid = vllm_config.liquid_config.instance_uuid
         super().__init__(*args, **kwargs)
-        self.gpu_ids = self.vllm_config.liquid_config.gpu_ids
-        self.instance_uuid = self.vllm_config.liquid_config.instance_uuid
+        # self.gpu_ids = self.vllm_config.liquid_config.gpu_ids
+        # self.instance_uuid = self.vllm_config.liquid_config.instance_uuid
 
     def _init_executor(self) -> None:
         logger.info(f"init liquid executor...")
-        self.workers: List[GPUProxyClient] = []
+        # Set up proxy client
+        self.proxy_clients: List[GPUProxyClient] = []
         for gpu_id in self.gpu_ids:
             task_queue = self.shared_dict["task_queue_dict"][gpu_id]
             result_queue = self.shared_dict["result_queue_dict"][gpu_id]
             lock = self.shared_dict["lock_dict"][gpu_id]
-            worker = GPUProxyClient(gpu_id, task_queue, result_queue, lock, self.instance_uuid)
-            self.workers.append(worker)
+            proxy_client = GPUProxyClient(gpu_id, task_queue, result_queue, lock, self.instance_uuid)
+            proxy_client.start()
+            self.proxy_clients.append(proxy_client)
+
+        self._run_workers("load_model")
 
     def _check_executor_parameters(self):
         world_size = self.parallel_config.world_size
@@ -66,6 +74,8 @@ class LiquidExecutor(DistributedGPUExecutor):
         if (worker_monitor := getattr(self, "worker_monitor",
                                       None)) is not None:
             worker_monitor.close()
+        for proxy_client in self.proxy_clients:
+            proxy_client.stop()
 
     def _driver_execute_model(
         self, execute_model_req: Optional[ExecuteModelRequest]
@@ -108,15 +118,12 @@ class LiquidExecutor(DistributedGPUExecutor):
         # Start all remote workers first.
         worker_outputs = [
             worker.execute_method(method, *args, **kwargs)
-            for worker in self.workers
+            for worker in self.proxy_clients
         ]
 
-        driver_worker_method = getattr(self.driver_worker, method)
-        driver_worker_output = driver_worker_method(*args, **kwargs)
 
         # Get the results of the workers.
-        return [driver_worker_output
-                ] + [output.get() for output in worker_outputs]
+        return [output.get() for output in worker_outputs]
 
     def check_health(self) -> None:
         """Raises an error if engine is unhealthy."""
