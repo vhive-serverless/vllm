@@ -116,6 +116,7 @@ class MQLLMEngine:
         engine_config.liquid_config = LiquidConfig(gpu_ids=[], instance_uuid="")
         engine_config.liquid_config.gpu_ids = kwargs.pop("gpu_ids", [])
         engine_config.liquid_config.instance_uuid = kwargs.pop("instance_uuid", "")
+        engine_config.model_config.use_async_output_proc = False
         executor_class = LLMEngine._get_executor_cls(engine_config)
 
         use_async_sockets = engine_config.model_config.use_async_output_proc

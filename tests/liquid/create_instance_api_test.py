@@ -11,7 +11,7 @@ generated_uuid = str(uuid.uuid4())
 payload = {
     "uuid": generated_uuid,
     "cli": "vllm",
-    "env": ["CUDA_VISIBLE_DEVICES=0"],
+    "env": ["CUDA_VISIBLE_DEVICES=0,1"],
     "args": [
         "serve",
         "facebook/opt-125m",
@@ -20,7 +20,7 @@ payload = {
         "--load-format",
         "auto",
         "--served-model-name",
-        "meta-llama/Llama-3.1-8B",
+        "facebook/opt-125m",
         "--enable-chunked-prefill",
         "True",
         "--max-num-batched-token",

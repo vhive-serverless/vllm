@@ -32,6 +32,7 @@ class LiquidExecutor(DistributedGPUExecutor):
         self.shared_dict = shared_dict
         self.gpu_ids = vllm_config.liquid_config.gpu_ids
         self.instance_uuid = vllm_config.liquid_config.instance_uuid
+        self.driver_rank = self.gpu_ids[0]
         super().__init__(*args, **kwargs)
         # self.gpu_ids = self.vllm_config.liquid_config.gpu_ids
         # self.instance_uuid = self.vllm_config.liquid_config.instance_uuid
@@ -40,6 +41,7 @@ class LiquidExecutor(DistributedGPUExecutor):
         logger.info(f"init liquid executor...")
         # Set up proxy client
         self.proxy_clients: List[GPUProxyClient] = []
+        self.non_driver_proxy_clients : List[GPUProxyClient] = []
         for gpu_id in self.gpu_ids:
             task_queue = self.shared_dict["task_queue_dict"][gpu_id]
             result_queue = self.shared_dict["result_queue_dict"][gpu_id]
@@ -47,6 +49,10 @@ class LiquidExecutor(DistributedGPUExecutor):
             proxy_client = GPUProxyClient(gpu_id, task_queue, result_queue, lock, self.instance_uuid)
             proxy_client.start()
             self.proxy_clients.append(proxy_client)
+            if gpu_id == self.driver_rank:
+                self.driver_proxy_client: GPUProxyClient = proxy_client
+            else:
+                self.non_driver_proxy_clients.append(proxy_client)
 
         self._run_workers("load_model")
 
@@ -77,6 +83,22 @@ class LiquidExecutor(DistributedGPUExecutor):
         for proxy_client in self.proxy_clients:
             proxy_client.stop()
 
+    
+    def execute_model(
+        self,
+        execute_model_req: ExecuteModelRequest,
+    ) -> List[SamplerOutput]:
+        if self.parallel_worker_tasks is None:
+            self.parallel_worker_tasks = self._run_workers(
+                "start_worker_execution_loop",
+                async_run_tensor_parallel_workers_only=True,
+                **self.extra_execute_model_run_workers_kwargs)
+
+        # Only the driver worker returns the sampling results.
+        driver_outputs = self._driver_execute_model(execute_model_req)
+        assert driver_outputs is not None
+        return driver_outputs
+
     def _driver_execute_model(
         self, execute_model_req: Optional[ExecuteModelRequest]
     ) -> Optional[List[SamplerOutput]]:
@@ -85,7 +107,8 @@ class LiquidExecutor(DistributedGPUExecutor):
         Passing None will cause the driver to stop the model execution
         loop running in each of the remote workers.
         """
-        return self.driver_worker.execute_model(execute_model_req)
+        future = self.driver_proxy_client.execute_method("execute_model", execute_model_req)
+        return future.get()
 
     def _run_workers(
         self,
@@ -112,7 +135,7 @@ class LiquidExecutor(DistributedGPUExecutor):
             # Run only non-driver workers and just return futures.
             return [
                 worker.execute_method(method, *args, **kwargs)
-                for worker in self.non_driver_workers
+                for worker in self.non_driver_proxy_clients
             ]
 
         # Start all remote workers first.

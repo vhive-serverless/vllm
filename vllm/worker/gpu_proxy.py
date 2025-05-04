@@ -486,11 +486,17 @@ class GPUProxy(LocalOrDistributedWorkerBase):
                                                 self.model_config,
                                                 self.parallel_config)
 
+    def set_is_driver_worker(self, is_driver_worker: bool):
+        # overwrite self and model runner's driver worker member
+        self.is_driver_worker = is_driver_worker
+        self.model_runner.is_driver_worker = is_driver_worker
+
     def print_args_and_return(self, *args, **kwargs) -> str:
         result_str = ""
         for i, arg in enumerate(args):
             result_str += f"arg{i}: {arg};"
         return result_str
+
 
 
 
