@@ -1824,6 +1824,11 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
                     kv_caches=kv_caches
                 )
 
+            if not bypass_model_exec:
+                assert model_input.is_prompt, "model input is not prompt!"
+                for request_id, _ in model_input.request_ids_to_seq_ids.items():
+                    logger.info(f"[KV-transfer] request recv kv failed!: {request_id}")
+
         multi_modal_kwargs = model_input.multi_modal_kwargs or {}
         seqlen_agnostic_kwargs = {
             "finished_requests_ids": model_input.finished_requests_ids,
