@@ -10,6 +10,7 @@ import hashlib
 from typing import TYPE_CHECKING, Union
 
 import torch
+import time
 
 from vllm.config import VllmConfig
 from vllm.distributed.kv_transfer.kv_connector.base import KVConnectorBase
@@ -112,6 +113,14 @@ class MooncakeStoreConnector(KVConnectorBase):
 
         logger.debug("[rank%d]: KV send DONE.", torch.distributed.get_rank())
 
+    def retry_get(self, key, retries=3, delay=0.01):  # delay in seconds (10ms)
+        for attempt in range(retries):
+            value = self.kv_store.get(key)
+            if value is not None:
+                return value
+            time.sleep(delay)
+        return None
+
     def recv_kv_caches_and_hidden_states(
         self, model_executable: torch.nn.Module,
         model_input: "ModelInputForGPUWithSamplingMetadata",
@@ -148,9 +157,9 @@ class MooncakeStoreConnector(KVConnectorBase):
             # get roi for current seq
             load_key_prefix = self.tensor_hash(current_tokens)
             load_kvcache_key = f"{load_key_prefix}_{self.local_tp_rank}"
-            remote_kv = self.kv_store.get(load_kvcache_key)
+            remote_kv = self.retry_get(load_kvcache_key)
             hidden_key = f"{load_key_prefix}_hidden_{self.local_tp_rank}"
-            hidden = self.kv_store.get(hidden_key)
+            hidden = self.retry_get(hidden_key)
 
             if remote_kv is None or hidden is None:
                 # didn't find any match.
