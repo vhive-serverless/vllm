@@ -19,6 +19,8 @@ from vllm.v1.engine.logprobs import LogprobsProcessor
 from vllm.v1.engine.parallel_sampling import ParentRequest
 from vllm.v1.metrics.stats import (IterationStats, LoRARequestStates,
                                    RequestStateStats)
+from vllm.sequence import RequestMetrics
+import time
 
 
 class RequestOutputCollector:
@@ -221,6 +223,10 @@ class RequestState:
         else:
             prompt_logprobs = self.logprobs_processor.prompt_logprobs
 
+        metrics = None
+        if finished:
+            metrics: RequestMetrics = self._convert_stats_to_metrics()
+
         return RequestOutput(
             request_id=request_id,
             prompt=self.prompt,
@@ -230,7 +236,28 @@ class RequestState:
             finished=finished,
             kv_transfer_params=kv_transfer_params,
             num_cached_tokens=num_cached_tokens,
+            metrics=metrics
         )
+
+    def _convert_stats_to_metrics(self) -> RequestMetrics:
+        
+        queued_time = self.stats.scheduled_ts - self.stats.queued_ts
+
+        # Prefill interval is from first SCHEDULED to first NEW_TOKEN
+        # Any preemptions during prefill is included in the interval
+        prefill_time = self.stats.first_token_ts - self.stats.scheduled_ts
+
+        # Decode interval is from first NEW_TOKEN to last NEW_TOKEN
+        # Any preemptions during decode are included
+        metrics = RequestMetrics(
+            arrival_time=self.stats.arrival_time,
+            last_token_time=0,
+            first_scheduled_time=self.stats.arrival_time + queued_time,
+            time_in_queue=queued_time,
+            first_token_time=self.stats.arrival_time+queued_time+prefill_time,
+            finished_time=time.time()
+        )
+        return metrics
 
     def _new_completion_output(
         self,
