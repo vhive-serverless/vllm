@@ -25,12 +25,12 @@ from vllm.utils import make_async
 
 if TYPE_CHECKING:
     from vllm.config import ModelConfig
+import diskcache as dc
 
 logger = init_logger(__name__)
 
 AnyTokenizer = Union[PreTrainedTokenizer, PreTrainedTokenizerFast,
                      TokenizerBase]
-
 
 def decode_tokens(
     tokenizer: AnyTokenizer,
@@ -268,7 +268,6 @@ def get_tokenizer(
 
 
 cached_get_tokenizer = lru_cache(get_tokenizer)
-
 
 def cached_tokenizer_from_config(
     model_config: "ModelConfig",

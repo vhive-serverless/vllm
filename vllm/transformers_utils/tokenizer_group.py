@@ -8,9 +8,10 @@ from vllm.lora.request import LoRARequest
 from vllm.transformers_utils.tokenizer import (AnyTokenizer, encode_tokens,
                                                get_lora_tokenizer,
                                                get_lora_tokenizer_async,
-                                               get_tokenizer)
+                                               get_tokenizer,
+                                               )
 from vllm.utils import LRUCache
-
+import vllm.global_var as gv 
 
 class TokenizerGroup:
     """A group of tokenizers that can be used for LoRA adapters."""
@@ -21,7 +22,11 @@ class TokenizerGroup:
         self.tokenizer_config = tokenizer_config
         self.enable_lora = enable_lora
         self.max_input_length = max_input_length
-        self.tokenizer = get_tokenizer(self.tokenizer_id, **tokenizer_config)
+        # first try to get the tokenizer from global_var
+        if self.tokenizer_id in gv.TOKENIZER_MAP:
+            self.tokenizer = gv.TOKENIZER_MAP[self.tokenizer_id]
+        else:
+            self.tokenizer = get_tokenizer(self.tokenizer_id, **tokenizer_config)
         max_loras = tokenizer_config.get("max_loras", 0)
         self.lora_tokenizers = LRUCache[int, AnyTokenizer](
             capacity=max(max_loras, max_num_seqs) if enable_lora else 0)

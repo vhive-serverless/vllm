@@ -1723,38 +1723,37 @@ class GPUModelRunner(LoRAModelRunnerMixin):
 
     def load_model(self) -> None:
         logger.info("Starting to load model %s...", self.model_config.model)
-        with DeviceMemoryProfiler() as m:  # noqa: SIM117
-            time_before_load = time.perf_counter()
-            model_loader = get_model_loader(self.load_config)
-            if not hasattr(self, "model"):
-                logger.info("Loading model from scratch...")
-                self.model = model_loader.load_model(
-                    vllm_config=self.vllm_config,
-                    model_config=self.model_config)
-            else:
-                logger.info(
-                    "Model was already initialized. Loading weights inplace..."
-                )
-                model_loader.load_weights(self.model,
-                                          model_config=self.model_config)
-            if has_step_pooler(self.model):
-                self.input_batch.logits_processing_needs_token_ids = True
-            if self.lora_config:
-                self.model = self.load_lora_model(self.model,
-                                                  self.model_config,
-                                                  self.scheduler_config,
-                                                  self.lora_config,
-                                                  self.device)
-            if hasattr(self, "drafter"):
-                logger.info("Loading drafter model...")
-                self.drafter.load_model(self.model)
-            if self.use_aux_hidden_state_outputs:
-                self.model.set_aux_hidden_state_layers(
-                    self.model.get_eagle3_aux_hidden_state_layers())
-            time_after_load = time.perf_counter()
-        self.model_memory_usage = m.consumed_memory
-        logger.info("Model loading took %.4f GiB and %.6f seconds",
-                    self.model_memory_usage / GiB_bytes,
+        # with DeviceMemoryProfiler() as m:  # noqa: SIM117
+        time_before_load = time.perf_counter()
+        model_loader = get_model_loader(self.load_config)
+        if not hasattr(self, "model"):
+            logger.info("Loading model from scratch...")
+            self.model = model_loader.load_model(
+                vllm_config=self.vllm_config,
+                model_config=self.model_config)
+        else:
+            logger.info(
+                "Model was already initialized. Loading weights inplace..."
+            )
+            model_loader.load_weights(self.model,
+                                        model_config=self.model_config)
+        if has_step_pooler(self.model):
+            self.input_batch.logits_processing_needs_token_ids = True
+        if self.lora_config:
+            self.model = self.load_lora_model(self.model,
+                                                self.model_config,
+                                                self.scheduler_config,
+                                                self.lora_config,
+                                                self.device)
+        if hasattr(self, "drafter"):
+            logger.info("Loading drafter model...")
+            self.drafter.load_model(self.model)
+        if self.use_aux_hidden_state_outputs:
+            self.model.set_aux_hidden_state_layers(
+                self.model.get_eagle3_aux_hidden_state_layers())
+        time_after_load = time.perf_counter()
+        # self.model_memory_usage = m.consumed_memory
+        logger.info("Model loading took %.6f seconds",
                     time_after_load - time_before_load)
         prepare_communication_buffer_for_model(self.model)
 
