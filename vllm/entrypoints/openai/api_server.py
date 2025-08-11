@@ -30,7 +30,10 @@ from vllm.entrypoints.openai.serving_embedding import OpenAIServingEmbedding
 from vllm.logger import init_logger
 from vllm.usage.usage_lib import UsageContext
 
+import time 
+
 TIMEOUT_KEEP_ALIVE = 5  # seconds
+LATENCY_DATA_FILE = 'latency.csv'
 
 openai_serving_chat: OpenAIServingChat
 openai_serving_completion: OpenAIServingCompletion
@@ -59,6 +62,20 @@ async def lifespan(app: fastapi.FastAPI):
 
 app = fastapi.FastAPI(lifespan=lifespan)
 
+@app.middleware('http')
+async def log_latency(request: Request, call_next):
+    if request.url.path == "/v1/completions" and request.method == "POST":
+        start_time = time.time()
+        response = await call_next(request)
+        latency = time.time() - start_time
+        logger.info(f"POST /v1/completions latency: {latency:.4f} seconds")
+
+        with open(LATENCY_DATA_FILE, 'a') as file:
+            file.write(f'{latency}\n')
+
+        return response
+    else:
+        return await call_next(request)
 
 def parse_args():
     parser = make_arg_parser()
