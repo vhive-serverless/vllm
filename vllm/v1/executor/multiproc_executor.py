@@ -34,6 +34,7 @@ from vllm.utils import (get_distributed_init_method, get_mp_context,
 from vllm.v1.executor.abstract import Executor, FailureCallback
 from vllm.v1.outputs import ModelRunnerOutput
 from vllm.worker.worker_base import WorkerWrapperBase
+from vllm.coldstart_utils import create_profiler, fork_profiler, get_profiler
 
 logger = init_logger(__name__)
 
@@ -324,6 +325,8 @@ class WorkerProc:
         distributed_init_method: str,
         input_shm_handle: Handle,
     ):
+        profiler = fork_profiler(f"tp={rank}") 
+        profiler.mark("enter_worker_proc")
         self.rank = rank
         wrapper = WorkerWrapperBase(vllm_config=vllm_config, rpc_rank=rank)
         # TODO: move `init_worker` to executor level as a collective rpc call
@@ -354,8 +357,11 @@ class WorkerProc:
         self.worker_response_mq = MessageQueue(1, 1)
 
         # Initialize device and loads weights
+        profiler.mark(f"before_init_device")
         self.worker.init_device()
+        profiler.mark(f"after_init_device")
         self.worker.load_model()
+        profiler.mark(f"after_load_model")
 
     @staticmethod
     def make_worker_process(
@@ -365,7 +371,10 @@ class WorkerProc:
             distributed_init_method: str,
             input_shm_handle,  # Receive SchedulerOutput
     ) -> UnreadyWorkerProcHandle:
+        profiler = get_profiler()
+        profiler.mark(f"make_worker_process")
         context = get_mp_context()
+
         # (reader, writer)
         reader, writer = context.Pipe(duplex=False)
 

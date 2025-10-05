@@ -105,6 +105,7 @@ from vllm.utils import (Device, FlexibleArgumentParser, get_open_zmq_ipc_path,
                         is_valid_ipv6_address, set_ulimit)
 from vllm.v1.metrics.prometheus import get_prometheus_registry
 from vllm.version import __version__ as VLLM_VERSION
+from vllm.coldstart_utils import create_profiler, fork_profiler, get_profiler
 
 TIMEOUT_KEEP_ALIVE = 120  # seconds
 
@@ -155,7 +156,10 @@ async def build_async_engine_client(
 
     # Context manager to handle engine_client lifecycle
     # Ensures everything is shutdown and cleaned up on error/exit
+    profiler = get_profiler()
     engine_args = AsyncEngineArgs.from_cli_args(args)
+    profiler.mark(f"finish_build_engine_args")
+    
 
     async with build_async_engine_client_from_engine_args(
             engine_args, args.disable_frontend_multiprocessing,
@@ -178,6 +182,7 @@ async def build_async_engine_client_from_engine_args(
     """
 
     # Create the EngineConfig (determines if we can use V1).
+    profiler = get_profiler()
     usage_context = UsageContext.OPENAI_API_SERVER
     vllm_config = engine_args.create_engine_config(usage_context=usage_context)
 
@@ -201,6 +206,7 @@ async def build_async_engine_client_from_engine_args(
                 client_addresses=client_config,
                 client_index=client_index)
 
+            profiler.mark(f"finish_init_async_llm")
             # Don't keep the dummy data in memory
             await async_llm.reset_mm_cache()
 
@@ -912,6 +918,8 @@ TASK_HANDLERS: dict[str, dict[str, tuple]] = {
 }
 
 if envs.VLLM_SERVER_DEV_MODE:
+    logger.warning("SECURITY WARNING: Development endpoints are enabled! "
+                   "This should NOT be used in production!")
 
     @router.get("/server_info")
     async def show_server_info(raw_request: Request):
@@ -1282,6 +1290,8 @@ async def init_app_state(
         chat_template_content_format=args.chat_template_content_format,
         return_tokens_as_token_ids=args.return_tokens_as_token_ids,
         enable_auto_tools=args.enable_auto_tool_choice,
+        expand_tools_even_if_tool_choice_none=args.
+        expand_tools_even_if_tool_choice_none,
         tool_parser=args.tool_call_parser,
         reasoning_parser=args.reasoning_parser,
         enable_prompt_tokens_details=args.enable_prompt_tokens_details,
@@ -1311,24 +1321,27 @@ async def init_app_state(
         chat_template=resolved_chat_template,
         chat_template_content_format=args.chat_template_content_format,
     ) if model_config.task == "embed" else None
-    state.openai_serving_scores = ServingScores(
-        engine_client,
-        model_config,
-        state.openai_serving_models,
-        request_logger=request_logger) if model_config.task in (
-            "score", "embed", "pooling") else None
     state.openai_serving_classification = ServingClassification(
         engine_client,
         model_config,
         state.openai_serving_models,
         request_logger=request_logger,
     ) if model_config.task == "classify" else None
+
+    enable_serving_reranking = (model_config.task == "classify" and getattr(
+        model_config.hf_config, "num_labels", 0) == 1)
     state.jinaai_serving_reranking = ServingScores(
         engine_client,
         model_config,
         state.openai_serving_models,
-        request_logger=request_logger
-    ) if model_config.task == "score" else None
+        request_logger=request_logger) if enable_serving_reranking else None
+    state.openai_serving_scores = ServingScores(
+        engine_client,
+        model_config,
+        state.openai_serving_models,
+        request_logger=request_logger) if (
+            model_config.task == "embed" or enable_serving_reranking) else None
+
     state.openai_serving_tokenization = OpenAIServingTokenization(
         engine_client,
         model_config,
@@ -1432,6 +1445,10 @@ async def run_server_worker(listen_address,
                             client_config=None,
                             **uvicorn_kwargs) -> None:
     """Run a single API server worker."""
+    root_profiler = create_profiler()
+    root_profiler.mark("start_run_server_worker")
+    logger.info(f"create_profiler finished")
+
 
     if args.tool_parser_plugin and len(args.tool_parser_plugin) > 3:
         ToolParserManager.import_tool_parser(args.tool_parser_plugin)
@@ -1443,14 +1460,21 @@ async def run_server_worker(listen_address,
     if log_config is not None:
         uvicorn_kwargs['log_config'] = log_config
 
+    root_profiler.mark("start_build_async_engine_client")
     async with build_async_engine_client(args, client_config) as engine_client:
+        root_profiler.mark("finish_build_async_engine_client")
         app = build_app(args)
+        root_profiler.mark("finish_build_app")
 
         vllm_config = await engine_client.get_vllm_config()
         await init_app_state(engine_client, vllm_config, app.state, args)
+        root_profiler.mark("finish_init_app_state")
 
         logger.info("Starting vLLM API server %d on %s", server_index,
                     listen_address)
+        report = root_profiler.report()
+        root_profiler.dump_json() 
+        logger.info(f"coldstart profiler report: \n{report}")
         shutdown_task = await serve_http(
             app,
             sock=sock,
