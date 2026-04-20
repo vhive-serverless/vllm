@@ -605,6 +605,11 @@ class EngineArgs:
                             type=str,
                             default=None,
                             help='Name or path of the QLoRA adapter.')
+        parser.add_argument("--liquid-gpu-range", type=lambda s: [int(x) for x in s.split(",")], default=None, help="Liquid GPU range as comma-separated ints e.g. 0,1")
+        parser.add_argument("--liquid-gpu-space", type=int, default=None)
+        parser.add_argument("--liquid-driver-gpu-id", type=int, default=0)
+        parser.add_argument("--liquid-total-num-shards", type=int, default=None)
+        parser.add_argument("--liquid-worker-id", type=int, default=0)
         return parser
 
     @classmethod
